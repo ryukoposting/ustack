@@ -49,29 +49,31 @@ pub fn post(cx: Scope<PostProps>) -> Element {
             title: cx.props.post.title.to_string(),
             highlight: cx.props.post.highlight,
         }
-        main {
-            class: "post",
-            header {
-                a {
-                    href: "/",
-                    h1 { "{cx.props.site_title}" }
-                }
-
-                nav {
-                    a { href: "/", "Home" }
-                }
-            }
-            article {
+        body {
+            main {
+                class: "post",
                 header {
-                    h1 { "{cx.props.post.title}" },
-                    div {
-                        class: "byline",
-                        address,
+                    a {
+                        href: "/",
+                        h1 { "{cx.props.site_title}" }
+                    }
+
+                    nav {
+                        a { href: "/", "Home" }
                     }
                 }
-                div {
-                    class: "article-body",
-                    dangerous_inner_html: cx.props.post.body.as_str()
+                article {
+                    header {
+                        h1 { "{cx.props.post.title}" },
+                        div {
+                            class: "byline",
+                            address,
+                        }
+                    }
+                    div {
+                        class: "article-body",
+                        dangerous_inner_html: cx.props.post.body.as_str()
+                    }
                 }
             }
         }
