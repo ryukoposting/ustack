@@ -13,21 +13,22 @@ pub struct Init {
 
 impl Init {
     pub async fn run(self) -> Result<(), Box<dyn Error>> {
-        debug!("Creating posts directory");
+        debug!("Creating directories");
         fs::create_dir_all("posts").await?;
+        fs::create_dir_all("public").await?;
 
         if fs::try_exists("styles.css").await? {
             warn!("Not creating styles.css because it already exists");
         } else {
             debug!("Creating default styles.css");
-            let mut file = fs::File::create("styles.css").await?;
+            let mut file = fs::File::create("public/styles.css").await?;
             file.write_all(crate::DEFAULT_STYLES.as_bytes()).await?;
         }
 
         if fs::try_exists("index.md").await? {
             warn!("Not creating index.md because it already exists");
         } else {
-            debug!("Creating default styles.css");
+            debug!("Creating default index.md");
             let mut file = fs::File::create("index.md").await?;
             file.write_all(crate::DEFAULT_CONFIG.as_bytes()).await?;
         }
