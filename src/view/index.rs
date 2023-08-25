@@ -44,6 +44,7 @@ pub fn index(cx: Scope<IndexProps>) -> Element {
     };
 
     cx.render(rsx! {
+        meta { name: "viewport", content: "width=device-width, initial-scale=1.0" }
         title { "{cx.props.content.title}" }
         link {
             rel: "stylesheet",

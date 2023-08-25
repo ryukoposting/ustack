@@ -45,6 +45,7 @@ pub fn post(cx: Scope<PostProps>) -> Element {
     };
 
     cx.render(rsx! {
+        meta { name: "viewport", content: "width=device-width, initial-scale=1.0" }
         title { "{cx.props.post.title} | {cx.props.site_title}" }
         link {
             rel: "stylesheet",
