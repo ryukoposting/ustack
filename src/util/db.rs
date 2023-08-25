@@ -212,7 +212,7 @@ impl PostEntry {
         let mut options = ComrakOptions::default();
         options.extension.front_matter_delimiter = Some("---".into());
         options.extension.strikethrough = true;
-        options.extension.header_ids = Some("p-".to_string());
+        options.extension.header_ids = Some("".to_string());
         options.extension.table = true;
         options.extension.tasklist = true;
         options.render.unsafe_ = true;
