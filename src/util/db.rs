@@ -215,6 +215,7 @@ impl PostEntry {
         options.extension.header_ids = Some("p-".to_string());
         options.extension.table = true;
         options.extension.tasklist = true;
+        options.render.unsafe_ = true;
         options.parse.smart = true;
         options.parse.relaxed_tasklist_matching = true;
 
