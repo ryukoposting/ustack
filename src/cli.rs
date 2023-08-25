@@ -14,13 +14,16 @@ pub enum Action {
     Serve(crate::serve::Serve),
     /// Initialize a new blog in the current working directory.
     Init(crate::init::Init),
+    /// Generate new things from a template.
+    Generate(crate::generate::Generate)
 }
 
 impl Action {
     pub fn log_level(&self) -> LevelFilter {
         match self {
             Action::Serve(serve) => serve.log_level,
-            Action::Init(init) => init.log_level
+            Action::Init(init) => init.log_level,
+            Action::Generate(generate) => generate.log_level,
         }
     }
 }

@@ -1,8 +1,7 @@
-use std::error::Error;
+use std::{error::Error, fs, path::Path, io::Write};
 
 use clap::Parser;
 use log::{LevelFilter, debug, warn};
-use tokio::{fs, io::AsyncWriteExt};
 
 #[derive(Debug, Parser)]
 pub struct Init {
@@ -11,26 +10,38 @@ pub struct Init {
     pub log_level: LevelFilter,
 }
 
-impl Init {
-    pub async fn run(self) -> Result<(), Box<dyn Error>> {
-        debug!("Creating directories");
-        fs::create_dir_all("posts").await?;
-        fs::create_dir_all("public").await?;
+const DEFAULT_STYLES: &str = include_str!("res/default_styles.css");
+const DEFAULT_CONFIG: &str = include_str!("res/default_index.md");
+const SAMPLE_POST: &str = include_str!("res/sample_post.md");
 
-        if fs::try_exists("styles.css").await? {
+impl Init {
+    pub fn run(self) -> Result<(), Box<dyn Error>> {
+        debug!("Creating directories");
+        fs::create_dir_all("posts")?;
+        fs::create_dir_all("public")?;
+
+        if Path::new("styles.css").exists() {
             warn!("Not creating styles.css because it already exists");
         } else {
             debug!("Creating default styles.css");
-            let mut file = fs::File::create("public/styles.css").await?;
-            file.write_all(crate::DEFAULT_STYLES.as_bytes()).await?;
+            let mut file = fs::File::create("public/styles.css")?;
+            file.write_all(DEFAULT_STYLES.as_bytes())?;
         }
 
-        if fs::try_exists("index.md").await? {
+        if Path::new("index.md").exists() {
             warn!("Not creating index.md because it already exists");
         } else {
             debug!("Creating default index.md");
-            let mut file = fs::File::create("index.md").await?;
-            file.write_all(crate::DEFAULT_CONFIG.as_bytes()).await?;
+            let mut file = fs::File::create("index.md")?;
+            file.write_all(DEFAULT_CONFIG.as_bytes())?;
+        }
+
+        if Path::new("posts/sample-post.md").exists() {
+            warn!("Not creating posts/sample-post.md because it already exists");
+        } else {
+            debug!("Creating posts/sample-post.md");
+            let mut file = fs::File::create("posts/sample-post.md")?;
+            file.write_all(SAMPLE_POST.as_bytes())?;
         }
 
         Ok(())

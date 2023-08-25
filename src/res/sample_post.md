@@ -1,8 +1,26 @@
 ---
 title: Sample Post
-# author: Your Name
 summary: This is a sample post to get you started.
 ---
+
+# Adding an Author
+
+To get started, you might want to add an author to your blog post. Under the
+`title` and `summary` tags, you can add a tag that looks like this:
+
+```yaml
+author: Your Name Here
+```
+
+# Enabling Syntax Highlighting
+
+If you are writing a blog post that involves lots of code blocks, you might
+want to enable syntax highlighting for this post. You can do that with the
+`highlight` tag, like so:
+
+```yaml
+highlight: true
+```
 
 # About µstack
 
