@@ -4,6 +4,8 @@ use super::Error;
 #[derive(Debug, Deserialize)]
 pub struct Blog {
     pub title: String,
+    #[serde(default)]
+    pub highlight: bool,
 }
 
 impl Blog {

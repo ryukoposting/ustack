@@ -8,7 +8,7 @@ use std::{
 };
 
 use chrono::{DateTime, Local};
-use comrak::{nodes::NodeValue::FrontMatter, Arena, ComrakOptions, ComrakPlugins};
+use comrak::{nodes::NodeValue::FrontMatter, Arena, ComrakOptions};
 use log::{debug, error, info, warn};
 use tokio::{
     fs::{self, File},
@@ -31,6 +31,7 @@ pub struct PostEntry {
     title: String,
     author: Option<String>,
     summary: String,
+    highlight: bool,
 }
 
 pub struct Post<'a> {
@@ -52,6 +53,7 @@ pub struct PostContent {
     pub author: Option<String>,
     pub body: String,
     pub timestamp: DateTime<Local>,
+    pub highlight: bool,
 }
 
 impl PostDb {
@@ -197,6 +199,7 @@ impl PostEntry {
             title: String::default(),
             summary: String::default(),
             author: None,
+            highlight: false,
         }
     }
 
@@ -245,9 +248,11 @@ impl PostEntry {
                 self.title = fm.title;
                 self.author = fm.author;
                 self.summary = fm.summary;
+                self.highlight = fm.highlight;
             } else {
                 let fm = Blog::from_yaml(fm)?;
                 self.title = fm.title;
+                self.highlight = fm.highlight;
             }
         }
 
@@ -297,6 +302,7 @@ impl<'a> Post<'a> {
             body: self.body().to_string(),
             author: self.author().map(|a| a.to_string()),
             timestamp: self.entry.last_modified.into(),
+            highlight: self.entry.highlight,
         }
     }
 }

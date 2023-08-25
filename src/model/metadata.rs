@@ -6,6 +6,8 @@ pub struct Metadata {
     pub title: String,
     pub author: Option<String>,
     pub summary: String,
+    #[serde(default)]
+    pub highlight: bool,
 }
 
 impl Metadata {

@@ -44,11 +44,9 @@ pub fn index(cx: Scope<IndexProps>) -> Element {
     };
 
     cx.render(rsx! {
-        meta { name: "viewport", content: "width=device-width, initial-scale=1.0" }
-        title { "{cx.props.content.title}" }
-        link {
-            rel: "stylesheet",
-            href: "/public/styles.css"
+        super::preamble {
+            title: cx.props.content.title.to_string(),
+            highlight: cx.props.content.highlight,
         }
         main {
             class: "index",

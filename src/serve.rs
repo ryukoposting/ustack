@@ -1,22 +1,28 @@
 //! `serve` command handler.
 
-use chrono::{Local, DateTime, Utc, TimeZone};
+use chrono::{DateTime, Local, Utc};
 use clap::Parser;
 use dioxus::prelude::*;
 use hyper::{
-    header::{AGE, CACHE_CONTROL, CONTENT_TYPE, LAST_MODIFIED, IF_MODIFIED_SINCE, CONTENT_ENCODING},
+    header::{CACHE_CONTROL, CONTENT_TYPE, LAST_MODIFIED},
     server::conn::AddrStream,
     service::service_fn,
     Body, Method, Request, Response, StatusCode,
 };
 use itertools::Itertools;
-use log::{debug, info, LevelFilter, warn};
-use std::{convert::Infallible, env, error::Error, net::SocketAddr, path::PathBuf, sync::Arc, num::NonZeroUsize, io::ErrorKind};
-use tokio::{sync::RwLock, fs::File, io::AsyncReadExt};
+use log::{debug, info, warn, LevelFilter};
+use std::{
+    convert::Infallible, env, error::Error, io::ErrorKind, net::SocketAddr, num::NonZeroUsize,
+    path::PathBuf, sync::Arc,
+};
+use tokio::{fs::File, io::AsyncReadExt, sync::RwLock};
 use url::Url;
 
 use crate::{
-    util::{db::{PostContent, PostDb}, self},
+    util::{
+        self,
+        db::{PostContent, PostDb},
+    },
     view::{self, IndexProps, NotFoundProps, PostProps},
 };
 
@@ -31,7 +37,7 @@ pub struct Serve {
     address: SocketAddr,
 
     /// Post cache time-to-live, in seconds. Lower values result in more frequent updates to served content.
-    /// 
+    ///
     /// Values below the default are not recommended for production servers.
     #[arg(short = 'c', long, default_value = "300")]
     cache_ttl: u32,
@@ -70,7 +76,7 @@ impl Serve {
             db,
             address: self.address,
             index_page_len: self.index_page_len.into(),
-            public_dir
+            public_dir,
         };
         Ok(server)
     }
@@ -117,9 +123,7 @@ impl Server {
             };
 
             match index {
-                Ok(index) => {
-                    server.read().await.index(req, index).await
-                }
+                Ok(index) => server.read().await.index(req, index).await,
                 Err(err) => Err(err.into()),
             }
         } else if req.method() == Method::GET && req.uri().path().starts_with("/p/") {
@@ -166,27 +170,43 @@ impl Server {
         let subpath = req.uri().path().strip_prefix("/public/").unwrap();
         let path = self.public_dir.join(subpath);
 
+        let is_pem = path.extension().map_or(false, |ext| ext == "pem");
+
+        let is_id_rsa = path
+            .file_name()
+            .map_or(false, |name| name.to_string_lossy().contains("id_rsa"));
+
+        // Always return 404 for symlinks, files ending in .pem, and files containing id_rsa
+        if is_pem || is_id_rsa || path.is_symlink() {
+            return self.not_found(req).await;
+        }
+
         let mut file = match File::open(&path).await {
             Ok(file) => file,
-            Err(err) => if err.kind() == ErrorKind::NotFound {
-                return self.not_found(req).await;
-            } else {
-                return Err(err.into());
+            Err(err) => {
+                if err.kind() == ErrorKind::NotFound {
+                    return self.not_found(req).await;
+                } else {
+                    return Err(err.into());
+                }
             }
         };
 
-        let last_modified = file.metadata().await
+        let last_modified = file
+            .metadata()
+            .await
             .and_then(|meta| meta.modified())
             .map(|lm| DateTime::<Local>::from(lm))
             .ok();
 
-        let cache_valid = last_modified.as_ref()
+        let cache_valid = last_modified
+            .as_ref()
             .map_or(false, |timestamp| util::cache_valid(&req, timestamp));
 
         if cache_valid {
             return Ok(Response::builder()
                 .status(StatusCode::NOT_MODIFIED)
-                .body(Body::empty())?)
+                .body(Body::empty())?);
         }
 
         let mut body = vec![];
@@ -205,11 +225,15 @@ impl Server {
         Ok(resp.body(Body::from(body))?)
     }
 
-    async fn index(&self, req: Request<Body>, content: PostContent) -> Result<Response<Body>, Box<dyn Error>> {
+    async fn index(
+        &self,
+        req: Request<Body>,
+        content: PostContent,
+    ) -> Result<Response<Body>, Box<dyn Error>> {
         if util::cache_valid(&req, &self.db.index_updated()) {
             return Ok(Response::builder()
                 .status(StatusCode::NOT_MODIFIED)
-                .body(Body::empty())?)
+                .body(Body::empty())?);
         }
 
         let url = format!("http://dummy{}", req.uri());
@@ -269,17 +293,21 @@ impl Server {
             .body(Body::from(body))?)
     }
 
-    async fn post(&self, req: Request<Body>, post: PostContent) -> Result<Response<Body>, Box<dyn Error>> {
+    async fn post(
+        &self,
+        req: Request<Body>,
+        post: PostContent,
+    ) -> Result<Response<Body>, Box<dyn Error>> {
         if util::cache_valid(&req, &post.timestamp) {
             return Ok(Response::builder()
                 .status(StatusCode::NOT_MODIFIED)
-                .body(Body::empty())?)
+                .body(Body::empty())?);
         }
 
-        let site_title = self.db.site_title().map_or_else(
-            || "Untitled Blog".to_string(),
-            |title| title.to_string()
-        );
+        let site_title = self
+            .db
+            .site_title()
+            .map_or_else(|| "Untitled Blog".to_string(), |title| title.to_string());
         let last_modified = DateTime::<Utc>::from(post.timestamp).to_rfc2822();
         let mut vdom = VirtualDom::new_with_props(view::post, PostProps { post, site_title });
         let _ = vdom.rebuild();
