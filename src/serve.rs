@@ -194,8 +194,7 @@ impl Server {
 
         let resp = Response::builder()
             .status(StatusCode::OK)
-            .header(CACHE_CONTROL, "max-age=3600")
-            .header(CONTENT_TYPE, "text/html; charset=utf-8");
+            .header(CACHE_CONTROL, "max-age=3600");
 
         let resp = if let Some(lm) = last_modified {
             resp.header(LAST_MODIFIED, lm.to_rfc2822())
