@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use log::LevelFilter;
 
 #[derive(Debug, Parser)]
-#[command(author, version, about)]
+#[command(author, version, about, long_about = "Copyright (c) 2023 Evan Grove")]
 pub struct Cli {
     #[command(subcommand)]
     pub action: Action,

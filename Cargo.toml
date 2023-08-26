@@ -4,6 +4,7 @@ description = "self-hosted markdown blogging platform"
 version = "0.4.0"
 edition = "2021"
 authors = ["Evan Perry Grove <epgrove@maskedfort.com>"]
+license = "GPL-3.0-only"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
