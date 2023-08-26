@@ -45,11 +45,11 @@ pub fn index(cx: Scope<IndexProps>) -> Element {
 
     cx.render(rsx! {
         super::preamble {
-            title: &cx.props.content.title,
-            highlight: cx.props.content.highlight,
-            author: cx.props.content.author.as_deref(),
-            summary: cx.props.content.summary.as_deref(),
-            tags: &cx.props.content.tags
+            title: &cx.props.content.metadata.title,
+            highlight: cx.props.content.metadata.highlight,
+            author: cx.props.content.metadata.author.as_deref(),
+            summary: cx.props.content.metadata.summary.as_deref(),
+            tags: &cx.props.content.metadata.tags
         }
         body {
             main {
@@ -57,7 +57,7 @@ pub fn index(cx: Scope<IndexProps>) -> Element {
                 header {
                     a {
                         href: "/",
-                        h1 { "{cx.props.content.title}" }
+                        h1 { "{cx.props.content.metadata.title}" }
                     }
 
                     nav {

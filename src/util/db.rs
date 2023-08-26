@@ -4,36 +4,32 @@ use std::{
     collections::HashMap,
     io::{self, ErrorKind},
     path::PathBuf,
-    time::{Duration, SystemTime}, cmp::max,
+    time::{Duration, SystemTime}, cmp::max, cell::RefCell, error::Error,
 };
 
 use chrono::{DateTime, Local};
-use comrak::{nodes::NodeValue::FrontMatter, Arena, ComrakOptions};
+use comrak::{nodes::{NodeValue::FrontMatter, Ast}, Arena, ComrakOptions, arena_tree::Node};
 use log::{debug, error, info, warn};
+use url::Url;
+use crate::model::{Metadata, IndexMetadata};
 use tokio::{
     fs::{self, File},
     io::AsyncReadExt,
 };
-
-use crate::model::Metadata;
 
 pub struct PostDb {
     posts: HashMap<String, PostEntry>,
     posts_dir: PathBuf,
     ttl: Duration,
     index_updated: SystemTime,
+    index_metadata: IndexMetadata,
 }
 
 pub struct PostEntry {
     updated: SystemTime,
     last_modified: SystemTime,
+    metadata: Metadata,
     body: String,
-    title: String,
-    author: Option<String>,
-    summary: Option<String>,
-    highlight: bool,
-    tags: Vec<String>,
-    canonical: Option<String>,
 }
 
 pub struct Post<'a> {
@@ -51,14 +47,9 @@ pub struct PostMeta {
 #[derive(Debug, PartialEq)]
 pub struct PostContent {
     pub id: String,
-    pub title: String,
-    pub author: Option<String>,
-    pub summary: Option<String>,
     pub body: String,
-    pub timestamp: DateTime<Local>,
-    pub highlight: bool,
-    pub tags: Vec<String>,
-    pub canonical: Option<String>,
+    pub last_modified: SystemTime,
+    pub metadata: Metadata,
 }
 
 impl PostDb {
@@ -68,6 +59,7 @@ impl PostDb {
             posts_dir: dunce::canonicalize(posts_dir)?,
             ttl: Duration::from_secs(ttl_seconds as u64),
             index_updated: SystemTime::UNIX_EPOCH,
+            index_metadata: IndexMetadata::default(),
         })
     }
 
@@ -78,7 +70,7 @@ impl PostDb {
     pub fn all_posts<'a>(&'a self) -> impl Iterator<Item = Post<'a>> {
         self.posts
             .iter()
-            .filter(|(id, _)| id.as_str() != "")
+            .filter(|(id, _)| !id.starts_with("/"))
             .map(|(id, entry)| Post { id, entry })
     }
 
@@ -87,8 +79,13 @@ impl PostDb {
         self.index_updated.into()
     }
 
-    pub fn site_title(&self) -> Option<&str> {
-        self.get("").map(|index| index.title())
+    pub fn twitter_link(&self, id: &str) -> Result<Option<Url>, Box<dyn Error>> {
+        self.index_metadata.twitter_link(id)
+    }
+
+    /// Blog title
+    pub fn site_title(&self) -> &str {
+        &self.index_metadata.title
     }
 
     pub async fn refresh_index<'a>(&'a mut self, allow_search_all: bool) -> Result<Post<'a>, io::Error> {
@@ -113,7 +110,7 @@ impl PostDb {
         }
 
         let post_file = dunce::canonicalize(self.posts_dir.join("../index.md"))?;
-        self.refresh_inner("", post_file, true).await
+        self.refresh_inner("/index", post_file).await
     }
 
     pub async fn refresh<'a>(&'a mut self, id: &'a str) -> Result<Post<'a>, io::Error> {
@@ -138,17 +135,14 @@ impl PostDb {
             }
         };
 
-        self.refresh_inner(id, post_file, false).await
+        self.refresh_inner(id, post_file).await
     }
 
     async fn refresh_inner<'a>(
         &'a mut self,
         id: &'a str,
-        post_file: PathBuf,
-        is_index: bool,
+        post_file: PathBuf
     ) -> Result<Post<'a>, io::Error> {
-        // let res_dir = post_file.with_extension(""); // TODO: index posts dir for resource file changes
-
         let updated = self.posts.get(id).map(|ent| ent.updated);
 
         if updated.map_or(false, |updated| updated + self.ttl >= SystemTime::now()) {
@@ -175,47 +169,46 @@ impl PostDb {
             return Ok(self.get(id).unwrap());
         }
 
-        let mut entry = PostEntry::new();
-
-        entry.parse(file).await?;
-
-        self.posts.insert(id.to_string(), entry);
-
-        if is_index {
-            info!("Refreshed index");
+        if id == "/index" {
+            self.parse_index(file).await?;
         } else {
-            info!("Refreshed post {id}");
+            self.parse_page(file, id).await?;
         }
-
-        self.posts.get_mut(id).unwrap().last_modified = file_modified_time;
-
-        self.index_updated = max(file_modified_time, self.index_updated);
 
         Ok(self.get(id).unwrap())
     }
-}
 
-impl PostEntry {
-    fn new() -> Self {
-        PostEntry {
-            updated: SystemTime::now(),
-            last_modified: SystemTime::UNIX_EPOCH,
-            body: String::default(),
-            title: String::default(),
-            summary: None,
-            author: None,
-            canonical: None,
-            highlight: false,
-            tags: vec![],
-        }
+    async fn parse_index(&mut self, file: File) -> Result<(), io::Error> {
+        let (entry, meta) = PostEntry::parse_index(file).await?;
+
+        self.index_updated = max(entry.last_modified, self.index_updated);
+        self.index_metadata = meta;
+        self.posts.insert("/index".to_string(), entry);
+
+        info!("Refreshed /index");
+
+        Ok(())
     }
 
-    async fn parse(&mut self, mut file: File) -> Result<(), io::Error> {
-        let mut buffer = String::new();
-        file.read_to_string(&mut buffer).await?;
+    async fn parse_page(&mut self, file: File, id: &str) -> Result<(), io::Error> {
+        let entry = PostEntry::parse(file).await?;
 
-        let arena = Arena::new();
+        self.posts.insert(id.to_string(), entry);
 
+        info!("Refreshed {id}");
+
+        Ok(())
+    }
+}
+
+struct Parser<'a> {
+    arena: Arena<Node<'a, RefCell<Ast>>>,
+    buffer: String,
+    options: ComrakOptions,
+}
+
+impl<'a> Parser<'a> {
+    fn new(buffer: String) -> Self {
         let mut options = ComrakOptions::default();
         options.extension.front_matter_delimiter = Some("---".into());
         options.extension.strikethrough = true;
@@ -226,11 +219,24 @@ impl PostEntry {
         options.parse.smart = true;
         options.parse.relaxed_tasklist_matching = true;
 
-        let root = comrak::parse_document(&arena, &buffer, &options);
+        Self {
+            arena: Arena::new(),
+            buffer,
+            options
+        }
+    }
 
+    fn parse(&'a self) -> Result<&'a Node<'_, RefCell<Ast>>, io::Error> {
+        Ok(comrak::parse_document(&self.arena, &self.buffer, &self.options))
+    }
+
+    fn generate_html(&self, root: &'a Node<'a, RefCell<Ast>>) -> Result<Vec<u8>, io::Error> {
         let mut html = vec![];
-        comrak::format_html(root, &options, &mut html)?;
+        comrak::format_html(root, &self.options, &mut html)?;
+        Ok(html)
+    }
 
+    fn get_metadata(&self, root: &'a Node<'a, RefCell<Ast>>) -> Result<Metadata, io::Error> {
         let front_matter = root
             .clone()
             .children()
@@ -251,18 +257,81 @@ impl PostEntry {
                 .strip_suffix("---")
                 .unwrap();
 
-            let fm = Metadata::from_yaml(fm)?;
-            self.title = fm.title;
-            self.author = fm.author;
-            self.summary = fm.summary;
-            self.highlight = fm.highlight;
-            self.tags = fm.tags;
-            self.canonical = fm.canonical;
+            Ok(Metadata::from_yaml(fm)?)
+        } else {
+            Err(io::Error::new(ErrorKind::InvalidData, "Missing a YAML preamble"))
         }
+    }
 
-        self.body = String::from_utf8_lossy(&html).to_string();
+    fn get_index_metadata(&self, root: &'a Node<'a, RefCell<Ast>>) -> Result<IndexMetadata, io::Error> {
+        let front_matter = root
+            .clone()
+            .children()
+            .filter_map(|child| {
+                let data = child.data.borrow();
+                match &data.value {
+                    FrontMatter(fm) => Some(fm.clone()),
+                    _ => None,
+                }
+            })
+            .nth(0);
 
-        Ok(())
+        if let Some(fm) = front_matter {
+            let fm = fm
+                .trim()
+                .strip_prefix("---")
+                .unwrap()
+                .strip_suffix("---")
+                .unwrap();
+
+            Ok(IndexMetadata::from_yaml(fm)?)
+        } else {
+            Err(io::Error::new(ErrorKind::InvalidData, "Missing a YAML preamble"))
+        }
+    }
+}
+
+impl PostEntry {
+    pub async fn parse_index(mut file: File) -> Result<(Self, IndexMetadata), io::Error> {
+        let mut buffer = String::new();
+        file.read_to_string(&mut buffer).await?;
+
+        let last_modified = file.metadata().await?.modified()?;
+    
+        let parser = Parser::new(buffer);
+        let root = parser.parse()?;
+        let html = parser.generate_html(root)?;
+        let metadata = parser.get_index_metadata(root)?;
+
+        let entry = Self {
+            updated: SystemTime::now(),
+            last_modified,
+            metadata: metadata.clone().into(),
+            body: String::from_utf8_lossy(&html).to_string(),
+        };
+
+        Ok((entry, metadata))
+    }
+
+    pub async fn parse(mut file: File) -> Result<Self, io::Error> {
+        let mut buffer = String::new();
+        file.read_to_string(&mut buffer).await?;
+
+        let last_modified = file.metadata().await?.modified()?;
+    
+        let parser = Parser::new(buffer);
+        let root = parser.parse()?;
+        let html = parser.generate_html(root)?;
+        let metadata = parser.get_metadata(root)?;
+
+        let entry = Self {
+            updated: SystemTime::now(),
+            last_modified,
+            metadata: metadata.into(),
+            body: String::from_utf8_lossy(&html).to_string(),
+        };
+
+        Ok(entry)
     }
 }
 
@@ -279,42 +348,30 @@ impl<'a> Post<'a> {
         &self.entry.body
     }
 
-    pub fn title(&self) -> &'a str {
-        &self.entry.title
-    }
-
-    pub fn author(&self) -> Option<&'a str> {
-        self.entry.author.as_deref()
-    }
-
-    pub fn summary(&self) -> Option<&'a str> {
-        self.entry.summary.as_deref()
-    }
-
-    pub fn canonical(&self) -> Option<&'a str> {
-        self.entry.canonical.as_deref()
+    pub fn metadata(&self) -> &'a Metadata {
+        &self.entry.metadata
     }
 
     pub fn to_post_meta(&self) -> PostMeta {
         PostMeta {
             id: self.id().to_string(),
-            title: self.title().to_string(),
-            summary: self.summary().map(|s| s.to_string()),
+            title: self.metadata().title.to_string(),
+            summary: self.metadata().summary.as_ref().map(|s| s.to_string()),
         }
     }
 
-    pub fn to_post_content(&self, index_canonical: Option<&str>) -> PostContent {
+    pub fn to_post_content(&self) -> PostContent {
         PostContent {
             id: self.id().to_string(),
-            title: self.title().to_string(),
             body: self.body().to_string(),
-            author: self.author().map(|a| a.to_string()),
-            summary: self.summary().map(|a| a.to_string()),
-            timestamp: self.entry.last_modified.into(),
-            highlight: self.entry.highlight,
-            tags: self.entry.tags.clone(),
-            canonical: self.canonical().map(|s| s.to_string())
-                .or_else(|| index_canonical.map(|s| s.to_string()))
+            last_modified: self.entry.last_modified,
+            metadata: self.metadata().clone(),
         }
+    }
+}
+
+impl PostContent {
+    pub fn last_modified(&self) -> DateTime<Local> {
+        DateTime::from(self.last_modified)
     }
 }

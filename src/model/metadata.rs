@@ -1,7 +1,7 @@
 pub use serde::Deserialize;
-use super::Error;
+use super::{Error, IndexMetadata};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 pub struct Metadata {
     pub title: String,
     pub author: Option<String>,
@@ -10,13 +10,23 @@ pub struct Metadata {
     pub highlight: bool,
     #[serde(default)]
     pub tags: Vec<String>,
-    #[serde(default)]
-    pub canonical: Option<String>,
 }
 
 impl Metadata {
     pub fn from_yaml<S: AsRef<str>>(yaml: S) -> Result<Self, Error> {
         let deserializer = serde_yaml::Deserializer::from_str(yaml.as_ref());
         Ok(Self::deserialize(deserializer)?)
+    }
+}
+
+impl From<IndexMetadata> for Metadata {
+    fn from(value: IndexMetadata) -> Self {
+        Self {
+            title: value.title,
+            author: value.author,
+            summary: value.summary,
+            highlight: value.highlight,
+            tags: value.tags,
+        }
     }
 }

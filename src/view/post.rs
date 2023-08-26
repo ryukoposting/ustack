@@ -13,11 +13,11 @@ pub struct PostProps {
 }
 
 pub fn post(cx: Scope<PostProps>) -> Element {
-    let timestamp = cx.props.post.timestamp.format("%A, %e %B %Y");
-    let datetime = cx.props.post.timestamp.format("%F");
-    let time_title = cx.props.post.timestamp.format("%e %B %Y");
+    let timestamp = cx.props.post.last_modified().format("%A, %e %B %Y");
+    let datetime = cx.props.post.last_modified().format("%F");
+    let time_title = cx.props.post.last_modified().format("%e %B %Y");
 
-    let address = if let Some(author) = &cx.props.post.author {
+    let address = if let Some(author) = &cx.props.post.metadata.author {
         cx.render(rsx! {
             address {
                 class: "author",
@@ -60,11 +60,11 @@ pub fn post(cx: Scope<PostProps>) -> Element {
 
     cx.render(rsx! {
         super::preamble {
-            title: &cx.props.post.title,
-            highlight: cx.props.post.highlight,
-            author: cx.props.post.author.as_deref(),
-            summary: cx.props.post.summary.as_deref(),
-            tags: &cx.props.post.tags
+            title: &cx.props.post.metadata.title,
+            highlight: cx.props.post.metadata.highlight,
+            author: cx.props.post.metadata.author.as_deref(),
+            summary: cx.props.post.metadata.summary.as_deref(),
+            tags: &cx.props.post.metadata.tags
         }
         body {
             main {
@@ -81,7 +81,7 @@ pub fn post(cx: Scope<PostProps>) -> Element {
                 }
                 article {
                     header {
-                        h1 { "{cx.props.post.title}" },
+                        h1 { "{cx.props.post.metadata.title}" },
                         div {
                             class: "byline",
                             address,

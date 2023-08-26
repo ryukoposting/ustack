@@ -1,6 +1,6 @@
 //! `serve` command handler.
 
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local};
 use clap::Parser;
 use dioxus::prelude::*;
 use hyper::{
@@ -10,7 +10,7 @@ use hyper::{
     Body, Method, Request, Response, StatusCode,
 };
 use itertools::Itertools;
-use log::{debug, info, warn, LevelFilter};
+use log::{debug, info, LevelFilter, error};
 use std::{
     convert::Infallible, env, error::Error, io::ErrorKind, net::SocketAddr, num::NonZeroUsize,
     path::PathBuf, sync::Arc,
@@ -23,7 +23,7 @@ use crate::{
         self,
         db::{PostContent, PostDb},
     },
-    view::{self, IndexProps, NotFoundProps, PostProps}, model::Blog,
+    view::{self, IndexProps, NotFoundProps, PostProps},
 };
 
 #[derive(Debug, Parser)]
@@ -53,7 +53,6 @@ pub struct Serve {
 
 struct Server {
     db: PostDb,
-    blog: Blog,
     address: SocketAddr,
     index_page_len: usize,
     public_dir: PathBuf,
@@ -68,31 +67,25 @@ impl Serve {
             .map_or_else(|| env::current_dir(), |path| dunce::canonicalize(path))
     }
 
-    async fn into_server(self) -> Result<Server, Box<dyn Error>> {
+    fn into_server(self) -> Result<Server, Box<dyn Error>> {
         let dir = self.directory()?;
         let posts_dir = dir.join("posts");
         let public_dir = dir.join("public");
 
         let db = PostDb::new(posts_dir, self.cache_ttl)?;
 
-        let mut blog_file = File::open(dir.join("blog.yaml")).await?;
-        let mut blog_yaml = String::new();
-        blog_file.read_to_string(&mut blog_yaml).await?;
-        let blog = Blog::from_yaml(&blog_yaml)?;
-
         let server = Server {
             db,
             address: self.address,
             index_page_len: self.index_page_len.into(),
             public_dir,
-            blog
         };
         Ok(server)
     }
 
     pub async fn run(self) -> Result<(), Box<dyn Error>> {
         let address = self.address.clone();
-        let server = self.into_server().await?;
+        let server = self.into_server()?;
         let server = Arc::from(RwLock::new(server));
 
         let make_service = hyper::service::make_service_fn(|conn: &AddrStream| {
@@ -129,7 +122,7 @@ impl Server {
                     .db
                     .refresh_index(true)
                     .await
-                    .map(|post| post.to_post_content(None))
+                    .map(|post| post.to_post_content())
             };
 
             match index {
@@ -141,22 +134,15 @@ impl Server {
                 let id = req.uri().path().split('/').nth(2).unwrap_or("");
                 let mut server = server.write().await;
 
-                let index = server.db.refresh_index(false).await
-                    .map(|index| index.canonical());
-
-                let index_canonical = match index {
-                    Err(err) => {
-                        warn!("While refreshing index: {err}");
-                        None
-                    }
-                    Ok(canonical) => canonical.map(|s| s.to_owned())
-                };
+                if let Err(err) = server.db.refresh_index(false).await {
+                    error!("While refreshing index: {err}")
+                }
 
                 server
                     .db
                     .refresh(id)
                     .await
-                    .map(|post| post.to_post_content(index_canonical.as_deref()))
+                    .map(|post| post.to_post_content())
             };
 
             match post {
@@ -258,7 +244,7 @@ impl Server {
         }
 
         let url = format!("http://dummy{}", req.uri());
-        let last_modified = DateTime::<Utc>::from(content.timestamp).to_rfc2822();
+        let last_modified = content.last_modified().to_rfc2822();
         let page = Url::parse(&url).map(|url| {
             url.query_pairs()
                 .filter_map(|(k, v)| {
@@ -319,18 +305,15 @@ impl Server {
         req: Request<Body>,
         post: PostContent,
     ) -> Result<Response<Body>, Box<dyn Error>> {
-        if util::cache_valid(&req, &post.timestamp) {
+        if util::cache_valid(&req, &post.last_modified()) {
             return Ok(Response::builder()
                 .status(StatusCode::NOT_MODIFIED)
                 .body(Body::empty())?);
         }
 
-        let site_title = self
-            .db
-            .site_title()
-            .map_or_else(|| "Untitled Blog".to_string(), |title| title.to_string());
-        let last_modified = DateTime::<Utc>::from(post.timestamp).to_rfc2822();
-        let twitter_link = self.blog.twitter_link(&post.id)?;
+        let site_title = self.db.site_title().to_string();
+        let last_modified = post.last_modified().to_rfc2822();
+        let twitter_link = self.db.twitter_link(&post.id)?;
         let mut vdom = VirtualDom::new_with_props(view::post, PostProps { post, site_title, twitter_link });
         let _ = vdom.rebuild();
         let body = dioxus_ssr::render(&vdom);

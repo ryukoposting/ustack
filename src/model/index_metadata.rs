@@ -2,14 +2,23 @@ pub use serde::Deserialize;
 use url::Url;
 use super::Error;
 
-#[derive(Debug, Deserialize)]
-pub struct Blog {
-    url: String,
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct IndexMetadata {
+    pub title: String,
+    pub author: Option<String>,
+    pub summary: Option<String>,
     #[serde(default)]
-    twitter: bool,
+    pub highlight: bool,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub canonical: Option<String>,
+    pub url: String,
+    #[serde(default)]
+    pub twitter: bool,
 }
 
-impl Blog {
+impl IndexMetadata {
     pub fn from_yaml<S: AsRef<str>>(yaml: S) -> Result<Self, Error> {
         let deserializer = serde_yaml::Deserializer::from_str(yaml.as_ref());
         Ok(Self::deserialize(deserializer)?)
