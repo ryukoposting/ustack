@@ -79,6 +79,7 @@ impl PostDb {
         self.index_updated.into()
     }
 
+    /// Generates a twitter sharing link
     pub fn twitter_link(&self, id: &str) -> Result<Option<Url>, Box<dyn Error>> {
         self.index_metadata.twitter_link(id)
     }
@@ -86,6 +87,11 @@ impl PostDb {
     /// Blog title
     pub fn site_title(&self) -> &str {
         &self.index_metadata.title
+    }
+
+    /// Blog URL
+    pub fn site_url(&self) -> Result<Url, url::ParseError> {
+        Url::parse(&self.index_metadata.url)
     }
 
     pub async fn refresh_index<'a>(&'a mut self, allow_search_all: bool) -> Result<Post<'a>, io::Error> {

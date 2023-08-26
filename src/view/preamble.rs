@@ -1,8 +1,10 @@
 use dioxus::prelude::*;
+use url::Url;
 
 #[derive(Props)]
 pub struct PreambleProps<'a> {
     title: &'a str,
+    url: &'a Url,
     highlight: bool,
     #[props(!optional)]
     author: Option<&'a str>,
@@ -52,6 +54,7 @@ pub fn preamble<'a>(cx: Scope<'a, PreambleProps<'a>>) -> Element<'a> {
             meta { name: "viewport", content: "width=device-width,initial-scale=1" }
             title { "{cx.props.title}" }
             meta { name: "twitter:card", content: "summary" }
+            link { rel: "canonical", href: "{cx.props.url}" }
             author
             summary
             keywords

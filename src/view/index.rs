@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use url::Url;
 
 use crate::util::db::{PostMeta, PostContent};
 
@@ -8,6 +9,7 @@ pub struct IndexProps {
     pub page: usize,
     pub is_end: bool,
     pub content: PostContent,
+    pub canonical_url: Url,
 }
 
 pub fn index(cx: Scope<IndexProps>) -> Element {
@@ -49,7 +51,8 @@ pub fn index(cx: Scope<IndexProps>) -> Element {
             highlight: cx.props.content.metadata.highlight,
             author: cx.props.content.metadata.author.as_deref(),
             summary: cx.props.content.metadata.summary.as_deref(),
-            tags: &cx.props.content.metadata.tags
+            tags: &cx.props.content.metadata.tags,
+            url: &cx.props.canonical_url,
         }
         body {
             main {

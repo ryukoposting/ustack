@@ -11,8 +11,6 @@ pub struct IndexMetadata {
     pub highlight: bool,
     #[serde(default)]
     pub tags: Vec<String>,
-    #[serde(default)]
-    pub canonical: Option<String>,
     pub url: String,
     #[serde(default)]
     pub twitter: bool,

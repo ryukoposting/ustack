@@ -8,6 +8,7 @@ use crate::util::db::PostContent;
 pub struct PostProps {
     pub post: PostContent,
     pub site_title: String,
+    pub canonical_url: Url,
     #[props(!optional)]
     pub twitter_link: Option<Url>,
 }
@@ -64,7 +65,8 @@ pub fn post(cx: Scope<PostProps>) -> Element {
             highlight: cx.props.post.metadata.highlight,
             author: cx.props.post.metadata.author.as_deref(),
             summary: cx.props.post.metadata.summary.as_deref(),
-            tags: &cx.props.post.metadata.tags
+            tags: &cx.props.post.metadata.tags,
+            url: &cx.props.canonical_url,
         }
         body {
             main {

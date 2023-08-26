@@ -53,7 +53,7 @@ pub struct Serve {
 
 struct Server {
     db: PostDb,
-    address: SocketAddr,
+    // address: SocketAddr,
     index_page_len: usize,
     public_dir: PathBuf,
 }
@@ -76,7 +76,7 @@ impl Serve {
 
         let server = Server {
             db,
-            address: self.address,
+            // address: self.address,
             index_page_len: self.index_page_len.into(),
             public_dir,
         };
@@ -243,20 +243,28 @@ impl Server {
                 .body(Body::empty())?);
         }
 
-        let url = format!("http://dummy{}", req.uri());
+        let canonical_url = self.db.site_url()?;
+
+        let req_url = if req.uri().host().is_some() {
+            Url::parse(&req.uri().to_string())?
+        } else {
+            let mut req_url = canonical_url.clone();
+            req_url.set_path(req.uri().path());
+            req_url.set_query(req.uri().query());
+            req_url
+        };
+
         let last_modified = content.last_modified().to_rfc2822();
-        let page = Url::parse(&url).map(|url| {
-            url.query_pairs()
-                .filter_map(|(k, v)| {
-                    if k == "p" {
-                        Some(v.parse::<usize>())
-                    } else {
-                        None
-                    }
-                })
-                .nth(0)
-                .unwrap_or(Ok(0))
-        })?;
+        let page = req_url.query_pairs()
+            .filter_map(|(k, v)| {
+                if k == "p" {
+                    Some(v.parse::<usize>())
+                } else {
+                    None
+                }
+            })
+            .nth(0)
+            .unwrap_or(Ok(0));
 
         let page = match page {
             Ok(page) => page,
@@ -287,6 +295,7 @@ impl Server {
                 page,
                 is_end,
                 content,
+                canonical_url
             },
         );
         let _ = vdom.rebuild();
@@ -312,9 +321,12 @@ impl Server {
         }
 
         let site_title = self.db.site_title().to_string();
+        let mut canonical_url = self.db.site_url()?;
+        canonical_url.set_path(req.uri().path());
+        canonical_url.set_query(req.uri().query());
         let last_modified = post.last_modified().to_rfc2822();
         let twitter_link = self.db.twitter_link(&post.id)?;
-        let mut vdom = VirtualDom::new_with_props(view::post, PostProps { post, site_title, twitter_link });
+        let mut vdom = VirtualDom::new_with_props(view::post, PostProps { post, site_title, canonical_url, twitter_link });
         let _ = vdom.rebuild();
         let body = dioxus_ssr::render(&vdom);
 
