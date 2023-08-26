@@ -129,6 +129,16 @@ article img {
     margin-right: auto;
 }
 
+article img {
+    max-width: 100%;
+}
+
+article pre {
+    max-width: 100%;
+    overflow-x: scroll;
+    padding: 0.5rem 0 0.5rem 0.5rem;
+}
+
 article table {
     width: fit-content;
     max-width: 100%;
