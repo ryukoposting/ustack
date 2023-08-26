@@ -72,13 +72,13 @@ pub fn index(cx: Scope<IndexProps>) -> Element {
                     dangerous_inner_html: "{cx.props.content.body}"
                 }
                 section {
-                    h1 { "Recent Posts" }
+                    h2 { "Recent Posts" }
                     ol {
                         for post in cx.props.posts.iter() {
                             li {
                                 a {
                                     href: "/p/{post.id}",
-                                    h1 { "{post.title}" }
+                                    h3 { "{post.title}" }
                                 }
                                 post.summary.as_deref().unwrap_or_else(|| "")
                             }
