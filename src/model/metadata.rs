@@ -5,9 +5,13 @@ use super::Error;
 pub struct Metadata {
     pub title: String,
     pub author: Option<String>,
-    pub summary: String,
+    pub summary: Option<String>,
     #[serde(default)]
     pub highlight: bool,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub canonical: Option<String>,
 }
 
 impl Metadata {

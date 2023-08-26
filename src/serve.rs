@@ -58,6 +58,8 @@ struct Server {
     public_dir: PathBuf,
 }
 
+const ROBOTS_TXT: &str = include_str!("res/robots.txt");
+
 impl Serve {
     pub fn directory(&self) -> Result<PathBuf, std::io::Error> {
         self.directory
@@ -119,7 +121,7 @@ impl Server {
                     .db
                     .refresh_index(true)
                     .await
-                    .map(|post| post.to_post_content())
+                    .map(|post| post.to_post_content(None))
             };
 
             match index {
@@ -130,14 +132,23 @@ impl Server {
             let post = {
                 let id = req.uri().path().split('/').nth(2).unwrap_or("");
                 let mut server = server.write().await;
-                if let Err(err) = server.db.refresh_index(false).await {
-                    warn!("While refreshing index: {err}");
-                }
+
+                let index = server.db.refresh_index(false).await
+                    .map(|index| index.canonical());
+
+                let index_canonical = match index {
+                    Err(err) => {
+                        warn!("While refreshing index: {err}");
+                        None
+                    }
+                    Ok(canonical) => canonical.map(|s| s.to_owned())
+                };
+
                 server
                     .db
                     .refresh(id)
                     .await
-                    .map(|post| post.to_post_content())
+                    .map(|post| post.to_post_content(index_canonical.as_deref()))
             };
 
             match post {
@@ -150,6 +161,8 @@ impl Server {
         } else if req.method() == Method::GET && req.uri().path().starts_with("/public/") {
             let server = server.read().await;
             server.public(req).await
+        } else if req.method() == Method::GET && req.uri().path().to_lowercase().as_str() == "/robots.txt" {
+            Self::robots()
         } else {
             let server = server.read().await;
             server.not_found(req).await
@@ -319,6 +332,13 @@ impl Server {
             .header(LAST_MODIFIED, last_modified)
             .header(CONTENT_TYPE, "text/html; charset=utf-8")
             .body(Body::from(body))?)
+    }
+
+    fn robots() -> Result<Response<Body>, Box<dyn Error>> {
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "text/plain; charset=utf-8")
+            .body(Body::from(ROBOTS_TXT))?)
     }
 
     async fn not_found(&self, req: Request<Body>) -> Result<Response<Body>, Box<dyn Error>> {

@@ -1,12 +1,17 @@
 use dioxus::prelude::*;
 
-#[derive(Props,PartialEq)]
-pub struct PreambleProps {
-    title: String,
+#[derive(Props)]
+pub struct PreambleProps<'a> {
+    title: &'a str,
     highlight: bool,
+    #[props(!optional)]
+    author: Option<&'a str>,
+    #[props(!optional)]
+    summary: Option<&'a str>,
+    tags: &'a Vec<String>,
 }
 
-pub fn preamble(cx: Scope<PreambleProps>) -> Element {
+pub fn preamble<'a>(cx: Scope<'a, PreambleProps<'a>>) -> Element<'a> {
     let highlight = if cx.props.highlight {
         cx.render(rsx! {
             link {
@@ -24,11 +29,32 @@ pub fn preamble(cx: Scope<PreambleProps>) -> Element {
         None
     };
 
+    let author = cx.props.author.and_then(|author| cx.render(rsx! {
+        meta { name: "author", content: "{author}" }
+    }));
+
+    let summary = cx.props.summary.and_then(|summary| cx.render(rsx! {
+        meta { name: "description", content: "{summary}" }
+    }));
+
+    let keywords = if cx.props.tags.len() > 0 {
+        let keywords = cx.props.tags.join(", ");
+        cx.render(rsx! {
+            meta { name: "keywords", content: "{keywords}" }
+        })
+    } else {
+        None
+    };
+
     cx.render(rsx! {
         head {
             meta { charset: "utf-8" }
             meta { name: "viewport", content: "width=device-width,initial-scale=1" }
             title { "{cx.props.title}" }
+            meta { name: "twitter:card", content: "summary" }
+            author
+            summary
+            keywords
             highlight
             link {
                 rel: "stylesheet",

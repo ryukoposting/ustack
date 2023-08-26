@@ -15,7 +15,7 @@ use tokio::{
     io::AsyncReadExt,
 };
 
-use crate::model::{Blog, Metadata};
+use crate::model::Metadata;
 
 pub struct PostDb {
     posts: HashMap<String, PostEntry>,
@@ -30,8 +30,10 @@ pub struct PostEntry {
     body: String,
     title: String,
     author: Option<String>,
-    summary: String,
+    summary: Option<String>,
     highlight: bool,
+    tags: Vec<String>,
+    canonical: Option<String>,
 }
 
 pub struct Post<'a> {
@@ -43,7 +45,7 @@ pub struct Post<'a> {
 pub struct PostMeta {
     pub id: String,
     pub title: String,
-    pub summary: String,
+    pub summary: Option<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -51,9 +53,12 @@ pub struct PostContent {
     pub id: String,
     pub title: String,
     pub author: Option<String>,
+    pub summary: Option<String>,
     pub body: String,
     pub timestamp: DateTime<Local>,
     pub highlight: bool,
+    pub tags: Vec<String>,
+    pub canonical: Option<String>,
 }
 
 impl PostDb {
@@ -172,7 +177,7 @@ impl PostDb {
 
         let mut entry = PostEntry::new();
 
-        entry.parse(file, is_index).await?;
+        entry.parse(file).await?;
 
         self.posts.insert(id.to_string(), entry);
 
@@ -197,13 +202,15 @@ impl PostEntry {
             last_modified: SystemTime::UNIX_EPOCH,
             body: String::default(),
             title: String::default(),
-            summary: String::default(),
+            summary: None,
             author: None,
+            canonical: None,
             highlight: false,
+            tags: vec![],
         }
     }
 
-    async fn parse(&mut self, mut file: File, is_index: bool) -> Result<(), io::Error> {
+    async fn parse(&mut self, mut file: File) -> Result<(), io::Error> {
         let mut buffer = String::new();
         file.read_to_string(&mut buffer).await?;
 
@@ -244,17 +251,13 @@ impl PostEntry {
                 .strip_suffix("---")
                 .unwrap();
 
-            if !is_index {
-                let fm = Metadata::from_yaml(fm)?;
-                self.title = fm.title;
-                self.author = fm.author;
-                self.summary = fm.summary;
-                self.highlight = fm.highlight;
-            } else {
-                let fm = Blog::from_yaml(fm)?;
-                self.title = fm.title;
-                self.highlight = fm.highlight;
-            }
+            let fm = Metadata::from_yaml(fm)?;
+            self.title = fm.title;
+            self.author = fm.author;
+            self.summary = fm.summary;
+            self.highlight = fm.highlight;
+            self.tags = fm.tags;
+            self.canonical = fm.canonical;
         }
 
         self.body = String::from_utf8_lossy(&html).to_string();
@@ -284,26 +287,34 @@ impl<'a> Post<'a> {
         self.entry.author.as_deref()
     }
 
-    pub fn summary(&self) -> &'a str {
-        &self.entry.summary
+    pub fn summary(&self) -> Option<&'a str> {
+        self.entry.summary.as_deref()
+    }
+
+    pub fn canonical(&self) -> Option<&'a str> {
+        self.entry.canonical.as_deref()
     }
 
     pub fn to_post_meta(&self) -> PostMeta {
         PostMeta {
             id: self.id().to_string(),
             title: self.title().to_string(),
-            summary: self.summary().to_string(),
+            summary: self.summary().map(|s| s.to_string()),
         }
     }
 
-    pub fn to_post_content(&self) -> PostContent {
+    pub fn to_post_content(&self, index_canonical: Option<&str>) -> PostContent {
         PostContent {
             id: self.id().to_string(),
             title: self.title().to_string(),
             body: self.body().to_string(),
             author: self.author().map(|a| a.to_string()),
+            summary: self.summary().map(|a| a.to_string()),
             timestamp: self.entry.last_modified.into(),
             highlight: self.entry.highlight,
+            tags: self.entry.tags.clone(),
+            canonical: self.canonical().map(|s| s.to_string())
+                .or_else(|| index_canonical.map(|s| s.to_string()))
         }
     }
 }

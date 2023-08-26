@@ -45,8 +45,11 @@ pub fn index(cx: Scope<IndexProps>) -> Element {
 
     cx.render(rsx! {
         super::preamble {
-            title: cx.props.content.title.to_string(),
+            title: &cx.props.content.title,
             highlight: cx.props.content.highlight,
+            author: cx.props.content.author.as_deref(),
+            summary: cx.props.content.summary.as_deref(),
+            tags: &cx.props.content.tags
         }
         body {
             main {
@@ -74,8 +77,7 @@ pub fn index(cx: Scope<IndexProps>) -> Element {
                                     href: "/p/{post.id}",
                                     h1 { "{post.title}" }
                                 }
-
-                                "{post.summary}"
+                                post.summary.as_deref().unwrap_or_else(|| "")
                             }
                         }
                     }

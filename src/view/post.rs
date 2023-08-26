@@ -46,8 +46,11 @@ pub fn post(cx: Scope<PostProps>) -> Element {
 
     cx.render(rsx! {
         super::preamble {
-            title: cx.props.post.title.to_string(),
+            title: &cx.props.post.title,
             highlight: cx.props.post.highlight,
+            author: cx.props.post.author.as_deref(),
+            summary: cx.props.post.summary.as_deref(),
+            tags: &cx.props.post.tags
         }
         body {
             main {
