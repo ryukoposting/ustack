@@ -55,6 +55,8 @@ pub fn preamble<'a>(cx: Scope<'a, PreambleProps<'a>>) -> Element<'a> {
             title { "{cx.props.title}" }
             meta { name: "twitter:card", content: "summary" }
             link { rel: "canonical", href: "{cx.props.url}" }
+            link { rel: "icon", href: "/public/favicon.png" }
+            link { rel: "apple-touch-icon", href: "/public/favicon.png" }
             author
             summary
             keywords
