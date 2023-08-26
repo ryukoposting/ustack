@@ -1,6 +1,8 @@
 mod metadata;
+mod blog;
 
 pub use metadata::*;
+pub use blog::*;
 
 use std::fmt::Display;
 

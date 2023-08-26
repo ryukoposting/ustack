@@ -13,6 +13,7 @@ pub struct Init {
 const DEFAULT_STYLES: &str = include_str!("res/default_styles.css");
 const DEFAULT_CONFIG: &str = include_str!("res/default_index.md");
 const SAMPLE_POST: &str = include_str!("res/sample_post.md");
+const DEFAULT_BLOG: &str = include_str!("res/default_blog.yaml");
 
 impl Init {
     pub fn run(self) -> Result<(), Box<dyn Error>> {
@@ -20,12 +21,20 @@ impl Init {
         fs::create_dir_all("posts")?;
         fs::create_dir_all("public")?;
 
-        if Path::new("styles.css").exists() {
+        if Path::new("public/styles.css").exists() {
             warn!("Not creating styles.css because it already exists");
         } else {
             debug!("Creating default styles.css");
             let mut file = fs::File::create("public/styles.css")?;
             file.write_all(DEFAULT_STYLES.as_bytes())?;
+        }
+
+        if Path::new("blog.yaml").exists() {
+            warn!("Not creating blog.yaml because it already exists");
+        } else {
+            debug!("Creating default blog.yaml");
+            let mut file = fs::File::create("blog.yaml")?;
+            file.write_all(DEFAULT_BLOG.as_bytes())?;
         }
 
         if Path::new("index.md").exists() {

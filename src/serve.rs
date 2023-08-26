@@ -23,7 +23,7 @@ use crate::{
         self,
         db::{PostContent, PostDb},
     },
-    view::{self, IndexProps, NotFoundProps, PostProps},
+    view::{self, IndexProps, NotFoundProps, PostProps}, model::Blog,
 };
 
 #[derive(Debug, Parser)]
@@ -53,6 +53,7 @@ pub struct Serve {
 
 struct Server {
     db: PostDb,
+    blog: Blog,
     address: SocketAddr,
     index_page_len: usize,
     public_dir: PathBuf,
@@ -67,25 +68,32 @@ impl Serve {
             .map_or_else(|| env::current_dir(), |path| dunce::canonicalize(path))
     }
 
-    fn into_server(self) -> Result<Server, std::io::Error> {
+    async fn into_server(self) -> Result<Server, Box<dyn Error>> {
         let dir = self.directory()?;
         let posts_dir = dir.join("posts");
         let public_dir = dir.join("public");
 
         let db = PostDb::new(posts_dir, self.cache_ttl)?;
 
+        let mut blog_file = File::open(dir.join("blog.yaml")).await?;
+        let mut blog_yaml = String::new();
+        blog_file.read_to_string(&mut blog_yaml).await?;
+        let blog = Blog::from_yaml(&blog_yaml)?;
+
         let server = Server {
             db,
             address: self.address,
             index_page_len: self.index_page_len.into(),
             public_dir,
+            blog
         };
         Ok(server)
     }
 
     pub async fn run(self) -> Result<(), Box<dyn Error>> {
         let address = self.address.clone();
-        let server = Arc::from(RwLock::new(self.into_server()?));
+        let server = self.into_server().await?;
+        let server = Arc::from(RwLock::new(server));
 
         let make_service = hyper::service::make_service_fn(|conn: &AddrStream| {
             let address = conn.remote_addr();
@@ -322,7 +330,8 @@ impl Server {
             .site_title()
             .map_or_else(|| "Untitled Blog".to_string(), |title| title.to_string());
         let last_modified = DateTime::<Utc>::from(post.timestamp).to_rfc2822();
-        let mut vdom = VirtualDom::new_with_props(view::post, PostProps { post, site_title });
+        let twitter_link = self.blog.twitter_link(&post.id)?;
+        let mut vdom = VirtualDom::new_with_props(view::post, PostProps { post, site_title, twitter_link });
         let _ = vdom.rebuild();
         let body = dioxus_ssr::render(&vdom);
 

@@ -1,11 +1,15 @@
 use dioxus::prelude::*;
+use url::Url;
 
+use super::social;
 use crate::util::db::PostContent;
 
 #[derive(Props, PartialEq)]
 pub struct PostProps {
     pub post: PostContent,
     pub site_title: String,
+    #[props(!optional)]
+    pub twitter_link: Option<Url>,
 }
 
 pub fn post(cx: Scope<PostProps>) -> Element {
@@ -44,6 +48,16 @@ pub fn post(cx: Scope<PostProps>) -> Element {
         })
     };
 
+    let twitter = cx
+        .props
+        .twitter_link
+        .as_ref()
+        .map(|link| cx.render(rsx! {
+            social::twitter_share {
+                text: "{link}"
+            }
+        }));
+
     cx.render(rsx! {
         super::preamble {
             title: &cx.props.post.title,
@@ -78,6 +92,9 @@ pub fn post(cx: Scope<PostProps>) -> Element {
                         dangerous_inner_html: cx.props.post.body.as_str()
                     }
                 }
+            }
+            footer {
+                twitter
             }
         }
     })
