@@ -94,6 +94,10 @@ impl PostDb {
         Url::parse(&self.index_metadata.url)
     }
 
+    pub fn lang(&self) -> &str {
+        &self.index_metadata.lang
+    }
+
     pub async fn refresh_index<'a>(&'a mut self, allow_search_all: bool) -> Result<Post<'a>, io::Error> {
         if self.index_updated + self.ttl <= SystemTime::now() && allow_search_all {
             let mut posts_dir_iter = fs::read_dir(&self.posts_dir).await?;

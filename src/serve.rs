@@ -10,7 +10,7 @@ use hyper::{
     Body, Method, Request, Response, StatusCode,
 };
 use itertools::Itertools;
-use log::{debug, info, LevelFilter, error};
+use log::{debug, error, info, LevelFilter};
 use std::{
     convert::Infallible, env, error::Error, io::ErrorKind, net::SocketAddr, num::NonZeroUsize,
     path::PathBuf, sync::Arc,
@@ -155,7 +155,9 @@ impl Server {
         } else if req.method() == Method::GET && req.uri().path().starts_with("/public/") {
             let server = server.read().await;
             server.public(req).await
-        } else if req.method() == Method::GET && req.uri().path().to_lowercase().as_str() == "/robots.txt" {
+        } else if req.method() == Method::GET
+            && req.uri().path().to_lowercase().as_str() == "/robots.txt"
+        {
             Self::robots()
         } else {
             let server = server.read().await;
@@ -255,7 +257,8 @@ impl Server {
         };
 
         let last_modified = content.last_modified().to_rfc2822();
-        let page = req_url.query_pairs()
+        let page = req_url
+            .query_pairs()
             .filter_map(|(k, v)| {
                 if k == "p" {
                     Some(v.parse::<usize>())
@@ -288,18 +291,17 @@ impl Server {
 
         let is_end = nposts <= self.index_page_len * (page + 1);
 
-        let mut vdom = VirtualDom::new_with_props(
+        let vdom = VirtualDom::new_with_props(
             view::index,
             IndexProps {
                 posts,
                 page,
                 is_end,
                 content,
-                canonical_url
+                canonical_url,
             },
         );
-        let _ = vdom.rebuild();
-        let body = dioxus_ssr::render(&vdom);
+        let body = util::render_html(vdom, self.db.lang());
 
         Ok(Response::builder()
             .status(StatusCode::OK)
@@ -326,9 +328,17 @@ impl Server {
         canonical_url.set_query(req.uri().query());
         let last_modified = post.last_modified().to_rfc2822();
         let twitter_link = self.db.twitter_link(&post.id)?;
-        let mut vdom = VirtualDom::new_with_props(view::post, PostProps { post, site_title, canonical_url, twitter_link });
-        let _ = vdom.rebuild();
-        let body = dioxus_ssr::render(&vdom);
+
+        let vdom = VirtualDom::new_with_props(
+            view::post,
+            PostProps {
+                post,
+                site_title,
+                canonical_url,
+                twitter_link,
+            },
+        );
+        let body = util::render_html(vdom, self.db.lang());
 
         Ok(Response::builder()
             .status(StatusCode::OK)
@@ -348,12 +358,13 @@ impl Server {
     async fn not_found(&self, req: Request<Body>) -> Result<Response<Body>, Box<dyn Error>> {
         let path = req.uri().clone();
         let method = req.method().clone();
-        let mut vdom = VirtualDom::new_with_props(view::not_found, NotFoundProps { path, method });
-        let _ = vdom.rebuild();
+
+        let vdom = VirtualDom::new_with_props(view::not_found, NotFoundProps { path, method });
+        let body = util::render_html(vdom, self.db.lang());
 
         Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
             .header(CONTENT_TYPE, "text/html; charset=utf-8")
-            .body(Body::from(dioxus_ssr::render(&vdom)))?)
+            .body(Body::from(body))?)
     }
 }

@@ -14,6 +14,8 @@ pub struct IndexMetadata {
     pub url: String,
     #[serde(default)]
     pub twitter: bool,
+    #[serde(default = "default_lang")]
+    pub lang: String
 }
 
 impl IndexMetadata {
@@ -31,4 +33,8 @@ impl IndexMetadata {
             Ok(None)
         }
     }
+}
+
+fn default_lang() -> String {
+    "en".to_string()
 }
