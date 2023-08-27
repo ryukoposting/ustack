@@ -17,7 +17,7 @@ pub fn twitter_share<'a>(cx: Scope<'a, TwitterShareProps<'a>>) -> Element<'a> {
             class: "share twitter",
             href: "{path}",
             rel: "nofollow",
-            "Tweet"
+            "Share on Twitter"
         }
     })
 }
