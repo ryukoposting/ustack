@@ -1,21 +1,28 @@
 //! The blog "database" holds the logic for post caching.
 
 use std::{
+    cell::RefCell,
+    cmp::max,
     collections::HashMap,
+    error::Error,
     io::{self, ErrorKind},
-    path::PathBuf,
-    time::{Duration, SystemTime}, cmp::max, cell::RefCell, error::Error,
+    path::{PathBuf, Path},
+    time::{Duration, SystemTime},
 };
 
+use crate::model::{IndexMetadata, Metadata};
 use chrono::{DateTime, Local};
-use comrak::{nodes::{NodeValue::FrontMatter, Ast}, Arena, ComrakOptions, arena_tree::Node};
+use comrak::{
+    arena_tree::Node,
+    nodes::{Ast, NodeValue::FrontMatter},
+    Arena, ComrakOptions,
+};
 use log::{debug, error, info, warn};
-use url::Url;
-use crate::model::{Metadata, IndexMetadata};
 use tokio::{
     fs::{self, File},
     io::AsyncReadExt,
 };
+use url::Url;
 
 pub struct PostDb {
     posts: HashMap<String, PostEntry>,
@@ -98,15 +105,18 @@ impl PostDb {
         &self.index_metadata.lang
     }
 
-    pub async fn refresh_index<'a>(&'a mut self, allow_search_all: bool) -> Result<Post<'a>, io::Error> {
+    pub async fn refresh_index<'a>(
+        &'a mut self,
+        allow_search_all: bool,
+    ) -> Result<Post<'a>, io::Error> {
         if self.index_updated + self.ttl <= SystemTime::now() && allow_search_all {
             let mut posts_dir_iter = fs::read_dir(&self.posts_dir).await?;
             while let Some(ent) = posts_dir_iter.next_entry().await? {
                 let path = PathBuf::from(ent.file_name());
 
-                let is_markdown = path.extension()
-                    .map_or(false, |ext| ext == "md");
-                let is_dotted = path.file_name()
+                let is_markdown = path.extension().map_or(false, |ext| ext == "md");
+                let is_dotted = path
+                    .file_name()
                     .map_or(false, |name| name.to_string_lossy().starts_with('.'));
 
                 if is_dotted || !is_markdown {
@@ -129,25 +139,56 @@ impl PostDb {
         self.refresh_inner("/index", post_file).await
     }
 
+    fn validate_post_path(&self, id: &str, path: &Path) -> Result<(), io::Error> {
+        fn invalid_path(id: &str) -> io::Error {
+            io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Invalid post id {id:?}")
+            )
+        }
+
+        let valid_filename =
+            path.extension().map_or(false, |ext| ext == "md") &&
+            path.file_name().map_or(false, |name| {
+                name.to_str().map_or(false, |name| name.starts_with(|c| matches!(c, 'A'..='Z' | 'a'..='z' | '0'..='9')))
+            }
+        );
+
+        let valid_parent_path = path.starts_with(&self.posts_dir);
+
+        if !valid_parent_path {
+            warn!("Suspicious post id={id:?} did not start with canonical posts_dir");
+            Err(invalid_path(id))
+        } else if !valid_filename {
+            Err(invalid_path(id))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn get_unvalidated_post_path(&self, id: &str) -> Result<PathBuf, io::Error> {
+        dunce::canonicalize(self.posts_dir.join(id).with_extension("md"))
+    }
+
+    /// Refresh db entry for a particular post
     pub async fn refresh<'a>(&'a mut self, id: &'a str) -> Result<Post<'a>, io::Error> {
-        let post_file = match dunce::canonicalize(self.posts_dir.join(id).with_extension("md")) {
-            Ok(ok) => {
-                if ok.starts_with(&self.posts_dir) {
-                    ok
+        let post_file = match self.get_unvalidated_post_path(id) {
+            Ok(path) => {
+                self.validate_post_path(id, &path)?;
+                path
+            }
+            Err(err) => {
+                if err.kind() == ErrorKind::NotFound {
+                    debug!("No such post with id {id}, trying to delete it from cache");
+                    self.posts.remove(id);
+                    return Err(err);
                 } else {
-                    warn!("Suspicious refresh request for id={id:?} did not start with canonical posts_dir");
+                    info!("Refresh request for id={id:?} caused error: {err}");
                     return Err(io::Error::new(
                         ErrorKind::InvalidData,
                         format!("Invalid post id {id:?}"),
                     ));
                 }
-            }
-            Err(err) => {
-                info!("Refresh request for id={id:?} caused error: {err}");
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Invalid post id {id:?}"),
-                ));
             }
         };
 
@@ -157,7 +198,7 @@ impl PostDb {
     async fn refresh_inner<'a>(
         &'a mut self,
         id: &'a str,
-        post_file: PathBuf
+        post_file: PathBuf,
     ) -> Result<Post<'a>, io::Error> {
         let updated = self.posts.get(id).map(|ent| ent.updated);
 
@@ -238,12 +279,16 @@ impl<'a> Parser<'a> {
         Self {
             arena: Arena::new(),
             buffer,
-            options
+            options,
         }
     }
 
     fn parse(&'a self) -> Result<&'a Node<'_, RefCell<Ast>>, io::Error> {
-        Ok(comrak::parse_document(&self.arena, &self.buffer, &self.options))
+        Ok(comrak::parse_document(
+            &self.arena,
+            &self.buffer,
+            &self.options,
+        ))
     }
 
     fn generate_html(&self, root: &'a Node<'a, RefCell<Ast>>) -> Result<Vec<u8>, io::Error> {
@@ -275,11 +320,17 @@ impl<'a> Parser<'a> {
 
             Ok(Metadata::from_yaml(fm)?)
         } else {
-            Err(io::Error::new(ErrorKind::InvalidData, "Missing a YAML preamble"))
+            Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "Missing a YAML preamble",
+            ))
         }
     }
 
-    fn get_index_metadata(&self, root: &'a Node<'a, RefCell<Ast>>) -> Result<IndexMetadata, io::Error> {
+    fn get_index_metadata(
+        &self,
+        root: &'a Node<'a, RefCell<Ast>>,
+    ) -> Result<IndexMetadata, io::Error> {
         let front_matter = root
             .clone()
             .children()
@@ -302,7 +353,10 @@ impl<'a> Parser<'a> {
 
             Ok(IndexMetadata::from_yaml(fm)?)
         } else {
-            Err(io::Error::new(ErrorKind::InvalidData, "Missing a YAML preamble"))
+            Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "Missing a YAML preamble",
+            ))
         }
     }
 }
@@ -313,7 +367,7 @@ impl PostEntry {
         file.read_to_string(&mut buffer).await?;
 
         let last_modified = file.metadata().await?.modified()?;
-    
+
         let parser = Parser::new(buffer);
         let root = parser.parse()?;
         let html = parser.generate_html(root)?;
@@ -334,7 +388,7 @@ impl PostEntry {
         file.read_to_string(&mut buffer).await?;
 
         let last_modified = file.metadata().await?.modified()?;
-    
+
         let parser = Parser::new(buffer);
         let root = parser.parse()?;
         let html = parser.generate_html(root)?;
