@@ -26,7 +26,7 @@ h1, h2, h3, h4, nav {
     font-family: 'Helvetica', sans-serif;
 }
 
-main {
+main, footer {
     max-width: 800px;
     margin: 0 auto;
 }
@@ -90,7 +90,7 @@ main.index > section li {
     padding-bottom: 1rem;
 }
 
-main.index > section li h1 {
+main.index > section li h3 {
     margin: 0 0 0.25rem 0;
     font-size: 1.2rem;
 }
@@ -127,6 +127,16 @@ article table,
 article img {
     margin-left: auto;
     margin-right: auto;
+}
+
+article img {
+    max-width: 100%;
+}
+
+article pre {
+    max-width: 100%;
+    overflow-x: scroll;
+    padding: 0.5rem 0 0.5rem 0.5rem;
 }
 
 article table {

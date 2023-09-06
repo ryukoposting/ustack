@@ -1,6 +1,6 @@
-use std::{error::Error, io, path::{PathBuf, Path}, fs};
+use std::{error::Error, path::Path, fs};
 use clap::{Parser, Subcommand};
-use log::{LevelFilter, debug, warn};
+use log::LevelFilter;
 
 #[derive(Debug, Parser)]
 pub struct Generate {

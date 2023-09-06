@@ -1,4 +1,5 @@
 use chrono::{DateTime, TimeZone};
+use dioxus::prelude::VirtualDom;
 use hyper::{Request, Body, header::{IF_MODIFIED_SINCE, CACHE_CONTROL}};
 
 pub mod db;
@@ -21,4 +22,12 @@ where
         .map_or(false, |cc| cc.contains("no-cache"));
 
     cache_valid && !no_cache
+}
+
+pub fn render_html(mut vdom: VirtualDom, lang: &str) -> String {
+    let _ = vdom.rebuild();
+    let mut renderer = dioxus_ssr::Renderer::new();
+    renderer.sanitize = true;
+    let lang = html_escape::encode_unquoted_attribute(lang);
+    format!("<!DOCTYPE html><html lang=\"{lang}\">{}</html>", renderer.render(&vdom))
 }

@@ -20,7 +20,7 @@ impl Init {
         fs::create_dir_all("posts")?;
         fs::create_dir_all("public")?;
 
-        if Path::new("styles.css").exists() {
+        if Path::new("public/styles.css").exists() {
             warn!("Not creating styles.css because it already exists");
         } else {
             debug!("Creating default styles.css");

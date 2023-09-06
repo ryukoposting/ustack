@@ -9,9 +9,11 @@ pub struct NotFoundProps {
 
 pub fn not_found(cx: Scope<NotFoundProps>) -> Element {
     cx.render(rsx! {
-        main {
-            h1 { "404: Not Found" }
-            p { "{cx.props.method} {cx.props.path}" }
+        body {
+            main {
+                h1 { "404: Not Found" }
+                p { "{cx.props.method} {cx.props.path}" }
+            }
         }
     })
 }

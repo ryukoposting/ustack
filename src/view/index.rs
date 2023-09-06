@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use url::Url;
 
 use crate::util::db::{PostMeta, PostContent};
 
@@ -8,6 +9,7 @@ pub struct IndexProps {
     pub page: usize,
     pub is_end: bool,
     pub content: PostContent,
+    pub canonical_url: Url,
 }
 
 pub fn index(cx: Scope<IndexProps>) -> Element {
@@ -45,44 +47,49 @@ pub fn index(cx: Scope<IndexProps>) -> Element {
 
     cx.render(rsx! {
         super::preamble {
-            title: cx.props.content.title.to_string(),
-            highlight: cx.props.content.highlight,
+            title: &cx.props.content.metadata.title,
+            highlight: cx.props.content.metadata.highlight,
+            author: cx.props.content.metadata.author.as_deref(),
+            summary: cx.props.content.metadata.summary.as_deref(),
+            tags: &cx.props.content.metadata.tags,
+            url: &cx.props.canonical_url,
         }
-        main {
-            class: "index",
-            header {
-                a {
-                    href: "/",
-                    h1 { "{cx.props.content.title}" }
-                }
+        body {
+            main {
+                class: "index",
+                header {
+                    a {
+                        href: "/",
+                        h1 { "{cx.props.content.metadata.title}" }
+                    }
 
-                nav {
-                    a { href: "/", "Home" }
+                    nav {
+                        a { href: "/", "Home" }
+                    }
                 }
-            }
-            div {
-                class: "index-content",
-                dangerous_inner_html: "{cx.props.content.body}"
-            }
-            section {
-                h1 { "Recent Posts" }
-                ol {
-                    for post in cx.props.posts.iter() {
-                        li {
-                            a {
-                                href: "/p/{post.id}",
-                                h1 { "{post.title}" }
+                div {
+                    class: "index-content",
+                    dangerous_inner_html: "{cx.props.content.body}"
+                }
+                section {
+                    h2 { "Recent Posts" }
+                    ol {
+                        for post in cx.props.posts.iter() {
+                            li {
+                                a {
+                                    href: "/p/{post.id}",
+                                    h3 { "{post.title}" }
+                                }
+                                post.summary.as_deref().unwrap_or_else(|| "")
                             }
-
-                            "{post.summary}"
                         }
                     }
                 }
-            }
-            nav {
-                back
-                "Page {cx.props.page + 1}"
-                forward
+                nav {
+                    back
+                    "Page {cx.props.page + 1}"
+                    forward
+                }
             }
         }
     })

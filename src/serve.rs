@@ -1,6 +1,6 @@
 //! `serve` command handler.
 
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local};
 use clap::Parser;
 use dioxus::prelude::*;
 use hyper::{
@@ -10,7 +10,7 @@ use hyper::{
     Body, Method, Request, Response, StatusCode,
 };
 use itertools::Itertools;
-use log::{debug, info, warn, LevelFilter};
+use log::{debug, error, info, LevelFilter};
 use std::{
     convert::Infallible, env, error::Error, io::ErrorKind, net::SocketAddr, num::NonZeroUsize,
     path::PathBuf, sync::Arc,
@@ -53,10 +53,12 @@ pub struct Serve {
 
 struct Server {
     db: PostDb,
-    address: SocketAddr,
+    // address: SocketAddr,
     index_page_len: usize,
     public_dir: PathBuf,
 }
+
+const ROBOTS_TXT: &str = include_str!("res/robots.txt");
 
 impl Serve {
     pub fn directory(&self) -> Result<PathBuf, std::io::Error> {
@@ -65,7 +67,7 @@ impl Serve {
             .map_or_else(|| env::current_dir(), |path| dunce::canonicalize(path))
     }
 
-    fn into_server(self) -> Result<Server, std::io::Error> {
+    fn into_server(self) -> Result<Server, Box<dyn Error>> {
         let dir = self.directory()?;
         let posts_dir = dir.join("posts");
         let public_dir = dir.join("public");
@@ -74,7 +76,7 @@ impl Serve {
 
         let server = Server {
             db,
-            address: self.address,
+            // address: self.address,
             index_page_len: self.index_page_len.into(),
             public_dir,
         };
@@ -83,7 +85,8 @@ impl Serve {
 
     pub async fn run(self) -> Result<(), Box<dyn Error>> {
         let address = self.address.clone();
-        let server = Arc::from(RwLock::new(self.into_server()?));
+        let server = self.into_server()?;
+        let server = Arc::from(RwLock::new(server));
 
         let make_service = hyper::service::make_service_fn(|conn: &AddrStream| {
             let address = conn.remote_addr();
@@ -130,9 +133,11 @@ impl Server {
             let post = {
                 let id = req.uri().path().split('/').nth(2).unwrap_or("");
                 let mut server = server.write().await;
+
                 if let Err(err) = server.db.refresh_index(false).await {
-                    warn!("While refreshing index: {err}");
+                    error!("While refreshing index: {err}")
                 }
+
                 server
                     .db
                     .refresh(id)
@@ -150,6 +155,10 @@ impl Server {
         } else if req.method() == Method::GET && req.uri().path().starts_with("/public/") {
             let server = server.read().await;
             server.public(req).await
+        } else if req.method() == Method::GET
+            && req.uri().path().to_lowercase().as_str() == "/robots.txt"
+        {
+            Self::robots()
         } else {
             let server = server.read().await;
             server.not_found(req).await
@@ -236,20 +245,29 @@ impl Server {
                 .body(Body::empty())?);
         }
 
-        let url = format!("http://dummy{}", req.uri());
-        let last_modified = DateTime::<Utc>::from(content.timestamp).to_rfc2822();
-        let page = Url::parse(&url).map(|url| {
-            url.query_pairs()
-                .filter_map(|(k, v)| {
-                    if k == "p" {
-                        Some(v.parse::<usize>())
-                    } else {
-                        None
-                    }
-                })
-                .nth(0)
-                .unwrap_or(Ok(0))
-        })?;
+        let canonical_url = self.db.site_url()?;
+
+        let req_url = if req.uri().host().is_some() {
+            Url::parse(&req.uri().to_string())?
+        } else {
+            let mut req_url = canonical_url.clone();
+            req_url.set_path(req.uri().path());
+            req_url.set_query(req.uri().query());
+            req_url
+        };
+
+        let last_modified = content.last_modified().to_rfc2822();
+        let page = req_url
+            .query_pairs()
+            .filter_map(|(k, v)| {
+                if k == "p" {
+                    Some(v.parse::<usize>())
+                } else {
+                    None
+                }
+            })
+            .nth(0)
+            .unwrap_or(Ok(0));
 
         let page = match page {
             Ok(page) => page,
@@ -273,17 +291,17 @@ impl Server {
 
         let is_end = nposts <= self.index_page_len * (page + 1);
 
-        let mut vdom = VirtualDom::new_with_props(
+        let vdom = VirtualDom::new_with_props(
             view::index,
             IndexProps {
                 posts,
                 page,
                 is_end,
                 content,
+                canonical_url,
             },
         );
-        let _ = vdom.rebuild();
-        let body = dioxus_ssr::render(&vdom);
+        let body = util::render_html(vdom, self.db.lang());
 
         Ok(Response::builder()
             .status(StatusCode::OK)
@@ -298,20 +316,29 @@ impl Server {
         req: Request<Body>,
         post: PostContent,
     ) -> Result<Response<Body>, Box<dyn Error>> {
-        if util::cache_valid(&req, &post.timestamp) {
+        if util::cache_valid(&req, &post.last_modified()) {
             return Ok(Response::builder()
                 .status(StatusCode::NOT_MODIFIED)
                 .body(Body::empty())?);
         }
 
-        let site_title = self
-            .db
-            .site_title()
-            .map_or_else(|| "Untitled Blog".to_string(), |title| title.to_string());
-        let last_modified = DateTime::<Utc>::from(post.timestamp).to_rfc2822();
-        let mut vdom = VirtualDom::new_with_props(view::post, PostProps { post, site_title });
-        let _ = vdom.rebuild();
-        let body = dioxus_ssr::render(&vdom);
+        let site_title = self.db.site_title().to_string();
+        let mut canonical_url = self.db.site_url()?;
+        canonical_url.set_path(req.uri().path());
+        canonical_url.set_query(req.uri().query());
+        let last_modified = post.last_modified().to_rfc2822();
+        let twitter_link = self.db.twitter_link(&post.id)?;
+
+        let vdom = VirtualDom::new_with_props(
+            view::post,
+            PostProps {
+                post,
+                site_title,
+                canonical_url,
+                twitter_link,
+            },
+        );
+        let body = util::render_html(vdom, self.db.lang());
 
         Ok(Response::builder()
             .status(StatusCode::OK)
@@ -321,15 +348,23 @@ impl Server {
             .body(Body::from(body))?)
     }
 
+    fn robots() -> Result<Response<Body>, Box<dyn Error>> {
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(CONTENT_TYPE, "text/plain; charset=utf-8")
+            .body(Body::from(ROBOTS_TXT))?)
+    }
+
     async fn not_found(&self, req: Request<Body>) -> Result<Response<Body>, Box<dyn Error>> {
         let path = req.uri().clone();
         let method = req.method().clone();
-        let mut vdom = VirtualDom::new_with_props(view::not_found, NotFoundProps { path, method });
-        let _ = vdom.rebuild();
+
+        let vdom = VirtualDom::new_with_props(view::not_found, NotFoundProps { path, method });
+        let body = util::render_html(vdom, self.db.lang());
 
         Ok(Response::builder()
             .status(StatusCode::NOT_FOUND)
             .header(CONTENT_TYPE, "text/html; charset=utf-8")
-            .body(Body::from(dioxus_ssr::render(&vdom)))?)
+            .body(Body::from(body))?)
     }
 }
