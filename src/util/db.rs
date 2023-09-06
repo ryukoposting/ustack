@@ -1,4 +1,4 @@
-//! The blog "database" holds the logic for post caching. It serves as the interface
+//! The blog "database" holds the logic for post caching.
 
 use std::{
     collections::HashMap,
@@ -91,7 +91,13 @@ impl PostDb {
             let mut posts_dir_iter = fs::read_dir(&self.posts_dir).await?;
             while let Some(ent) = posts_dir_iter.next_entry().await? {
                 let path = PathBuf::from(ent.file_name());
-                if !path.extension().map_or(false, |ext| ext == "md") {
+
+                let is_markdown = path.extension()
+                    .map_or(false, |ext| ext == "md");
+                let is_dotted = path.file_name()
+                    .map_or(false, |name| name.to_string_lossy().starts_with('.'));
+
+                if is_dotted || !is_markdown {
                     continue;
                 }
 
