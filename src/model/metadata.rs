@@ -1,4 +1,6 @@
 pub use serde::Deserialize;
+use crate::util::mydatetime::MyDateTime;
+
 use super::{Error, IndexMetadata};
 
 #[derive(Debug, Deserialize, PartialEq, Clone)]
@@ -6,6 +8,7 @@ pub struct Metadata {
     pub title: String,
     pub author: Option<String>,
     pub summary: Option<String>,
+    pub created: Option<MyDateTime>,
     #[serde(default)]
     pub highlight: bool,
     #[serde(default)]
@@ -25,6 +28,7 @@ impl From<IndexMetadata> for Metadata {
             title: value.title,
             author: value.author,
             summary: value.summary,
+            created: None,
             highlight: value.highlight,
             tags: value.tags,
         }

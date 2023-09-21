@@ -2,6 +2,8 @@ use std::{error::Error, path::Path, fs};
 use clap::{Parser, Subcommand};
 use log::LevelFilter;
 
+use crate::util::mydatetime::MyDateTime;
+
 #[derive(Debug, Parser)]
 pub struct Generate {
     /// Adjusts the verbosity of the logger.
@@ -43,6 +45,13 @@ impl Generate {
             return Err(format!("A post with this ID already exists!").into());
         }
 
-        Ok(fs::write(path, GENERATED_POST)?)
+        let output = GENERATED_POST.to_string();
+        let timestamp = MyDateTime::now()
+            .to_string_no_seconds()
+            .to_string();
+
+        let output = output.replace("{{CREATED}}", &timestamp);
+
+        Ok(fs::write(path, output)?)
     }
 }

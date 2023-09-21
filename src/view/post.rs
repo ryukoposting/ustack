@@ -1,3 +1,4 @@
+use chrono::{Local, DateTime};
 use dioxus::prelude::*;
 use url::Url;
 
@@ -14,9 +15,10 @@ pub struct PostProps {
 }
 
 pub fn post(cx: Scope<PostProps>) -> Element {
-    let timestamp = cx.props.post.last_modified().format("%A, %e %B %Y");
-    let datetime = cx.props.post.last_modified().format("%F");
-    let time_title = cx.props.post.last_modified().format("%e %B %Y");
+    let published = cx.props.post.published();
+    let timestamp = published.format("%A, %e %B %Y");
+    let datetime = published.format("%F");
+    let time_title = published.format("%e %B %Y");
 
     let address = if let Some(author) = &cx.props.post.metadata.author {
         cx.render(rsx! {

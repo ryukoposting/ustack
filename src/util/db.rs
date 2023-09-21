@@ -2,7 +2,7 @@
 
 use std::{
     cell::RefCell,
-    cmp::max,
+    cmp::{max, Ordering},
     collections::HashMap,
     error::Error,
     io::{self, ErrorKind},
@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::model::{IndexMetadata, Metadata};
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, FixedOffset};
 use comrak::{
     arena_tree::Node,
     nodes::{Ast, NodeValue::FrontMatter},
@@ -33,7 +33,9 @@ pub struct PostDb {
 }
 
 pub struct PostEntry {
+    /// The last time the database updated this PostEntry
     updated: SystemTime,
+    /// The last time the blog file was modified
     last_modified: SystemTime,
     metadata: Metadata,
     body: String,
@@ -406,8 +408,17 @@ impl PostEntry {
 }
 
 impl<'a> Post<'a> {
-    pub fn updated(&self) -> SystemTime {
-        self.entry.updated
+    // pub fn updated(&self) -> SystemTime {
+    //     self.entry.updated
+    // }
+
+    pub fn cmp_published(&self, other: &Post) -> Ordering {
+        match (&self.entry.metadata.created, &other.entry.metadata.created) {
+            (None, None) => self.entry.last_modified.cmp(&other.entry.last_modified),
+            (None, Some(b)) => self.entry.last_modified.cmp(&b.system_time()),
+            (Some(a), None) => a.system_time().cmp(&other.entry.last_modified),
+            (Some(a), Some(b)) => a.system_time().cmp(&b.system_time()),
+        }
     }
 
     pub fn id(&self) -> &'a str {
@@ -441,6 +452,14 @@ impl<'a> Post<'a> {
 }
 
 impl PostContent {
+    pub fn published(&self) -> DateTime<FixedOffset> {
+        if let Some(created) = &self.metadata.created {
+            created.fixed_offset()
+        } else {
+            self.last_modified().fixed_offset()
+        }
+    }
+
     pub fn last_modified(&self) -> DateTime<Local> {
         DateTime::from(self.last_modified)
     }

@@ -283,7 +283,8 @@ impl Server {
         let posts = self
             .db
             .all_posts()
-            .sorted_by_key(|p| p.updated())
+            .sorted_by(|a, b| b.cmp_published(a))
+            // .sorted_by_key(|p| p.updated())
             .skip(page * self.index_page_len)
             .take(self.index_page_len)
             .map(|post| post.to_post_meta())
