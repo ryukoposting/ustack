@@ -4,7 +4,7 @@ use chrono::{DateTime, Local};
 use clap::Parser;
 use dioxus::prelude::*;
 use hyper::{
-    header::{CACHE_CONTROL, CONTENT_TYPE, LAST_MODIFIED},
+    header::{CACHE_CONTROL, CONTENT_TYPE, LAST_MODIFIED, VARY},
     server::conn::AddrStream,
     service::service_fn,
     Body, Method, Request, Response, StatusCode,
@@ -115,7 +115,9 @@ impl Server {
     ) -> Result<Response<Body>, hyper::http::Error> {
         debug!("{client_addr} {} {:?}", req.method(), req.uri());
 
-        let result = if req.method() == Method::GET && req.uri().path() == "/" {
+        let req_uri = req.uri().path();
+
+        let result = if req.method() == Method::GET && (req_uri == "/" || req_uri == "/rss") {
             let index = {
                 let mut server = server.write().await;
                 server
@@ -126,12 +128,16 @@ impl Server {
             };
 
             match index {
-                Ok(index) => server.read().await.index(req, index).await,
+                Ok(index) => if req_uri == "/rss" {
+                    server.read().await.rss(req).await
+                } else {
+                    server.read().await.index(req, index).await
+                },
                 Err(err) => Err(err.into()),
             }
-        } else if req.method() == Method::GET && req.uri().path().starts_with("/p/") {
+        } else if req.method() == Method::GET && req_uri.starts_with("/p/") {
             let post = {
-                let id = req.uri().path().split('/').nth(2).unwrap_or("");
+                let id = req_uri.split('/').nth(2).unwrap_or("");
                 let mut server = server.write().await;
 
                 if let Err(err) = server.db.refresh_index(false).await {
@@ -152,11 +158,11 @@ impl Server {
                 }
                 Err(err) => Err(err.into()),
             }
-        } else if req.method() == Method::GET && req.uri().path().starts_with("/public/") {
+        } else if req.method() == Method::GET && req_uri.starts_with("/public/") {
             let server = server.read().await;
             server.public(req).await
         } else if req.method() == Method::GET
-            && req.uri().path().to_lowercase().as_str() == "/robots.txt"
+            && req_uri.to_lowercase().as_str() == "/robots.txt"
         {
             Self::robots()
         } else {
@@ -245,7 +251,7 @@ impl Server {
                 .body(Body::empty())?);
         }
 
-        let canonical_url = self.db.site_url()?;
+        let canonical_url = self.db.site_url().clone();
 
         let req_url = if req.uri().host().is_some() {
             Url::parse(&req.uri().to_string())?
@@ -324,7 +330,7 @@ impl Server {
         }
 
         let site_title = self.db.site_title().to_string();
-        let mut canonical_url = self.db.site_url()?;
+        let mut canonical_url = self.db.site_url().clone();
         canonical_url.set_path(req.uri().path());
         canonical_url.set_query(req.uri().query());
         let last_modified = post.last_modified().to_rfc2822();
@@ -347,6 +353,44 @@ impl Server {
             .header(LAST_MODIFIED, last_modified)
             .header(CONTENT_TYPE, "text/html; charset=utf-8")
             .body(Body::from(body))?)
+    }
+
+    async fn rss(&self, req: Request<Body>) -> Result<Response<Body>, Box<dyn Error>> {
+        if util::cache_valid(&req, &self.db.index_updated()) {
+            return Ok(Response::builder()
+                .status(StatusCode::NOT_MODIFIED)
+                .body(Body::empty())?);
+        }
+        
+        let aim_supported = req.headers()
+            .get("A-IM")
+            .map_or(false, |aim| aim == "feed");
+
+        let since = util::IfModifiedSince::new(&req);
+        let since = if aim_supported {
+            since.as_datetime()
+        } else {
+            None
+        };
+
+        let max_results = if aim_supported {
+            25
+        } else {
+            10
+        };
+
+        let rss = self.db.get_rss(since, max_results).build();
+        let last_modified = self.db.index_updated().to_rfc2822();
+
+        debug!("Sending {} items", rss.items.len());
+
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(CACHE_CONTROL, "im,max-age=3600")
+            .header(LAST_MODIFIED, last_modified)
+            .header(CONTENT_TYPE, "text/xml; charset=utf-8")
+            .header(VARY, "A-IM, If-Modified-Since")
+            .body(Body::from(rss.to_string()))?)
     }
 
     fn robots() -> Result<Response<Body>, Box<dyn Error>> {

@@ -1,7 +1,7 @@
 [package]
 name = "ustack"
 description = "self-hosted markdown blogging platform"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 authors = ["Evan Perry Grove <epgrove@maskedfort.com>"]
 license = "GPL-3.0-only"
@@ -24,3 +24,5 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9.25"
 chrono = "0.4.26"
 html-escape = "0.2.13"
+rss = { version = "2.0.6", features = ["atom", "builders"] }
+quick-xml = "0.31.0"

@@ -6,18 +6,21 @@ use std::{
     collections::HashMap,
     error::Error,
     io::{self, ErrorKind},
-    path::{PathBuf, Path},
+    path::{Path, PathBuf},
     time::{Duration, SystemTime},
 };
 
-use crate::model::{IndexMetadata, Metadata};
-use chrono::{DateTime, Local, FixedOffset};
+use crate::{model::{IndexMetadata, Metadata}, util};
+use super::mydatetime::MyDateTime;
+use chrono::{DateTime, FixedOffset, Local};
 use comrak::{
     arena_tree::Node,
     nodes::{Ast, NodeValue::FrontMatter},
     Arena, ComrakOptions,
 };
+use itertools::Itertools;
 use log::{debug, error, info, warn};
+use rss::{ChannelBuilder, extension::atom::{AtomExtensionBuilder, Link}, ImageBuilder};
 use tokio::{
     fs::{self, File},
     io::AsyncReadExt,
@@ -30,8 +33,10 @@ pub struct PostDb {
     ttl: Duration,
     index_updated: SystemTime,
     index_metadata: IndexMetadata,
+    rss_base: ChannelBuilder
 }
 
+#[derive(PartialEq, PartialOrd)]
 pub struct PostEntry {
     /// The last time the database updated this PostEntry
     updated: SystemTime,
@@ -44,6 +49,7 @@ pub struct PostEntry {
 pub struct Post<'a> {
     id: &'a str,
     entry: &'a PostEntry,
+    db: &'a PostDb
 }
 
 #[derive(Debug, PartialEq)]
@@ -69,18 +75,19 @@ impl PostDb {
             ttl: Duration::from_secs(ttl_seconds as u64),
             index_updated: SystemTime::UNIX_EPOCH,
             index_metadata: IndexMetadata::default(),
+            rss_base: ChannelBuilder::default()
         })
     }
 
     pub fn get<'a>(&'a self, id: &'a str) -> Option<Post<'a>> {
-        self.posts.get(id).map(|entry| Post { id, entry })
+        self.posts.get(id).map(|entry| Post { id, entry, db: self })
     }
 
     pub fn all_posts<'a>(&'a self) -> impl Iterator<Item = Post<'a>> {
         self.posts
             .iter()
             .filter(|(id, _)| !id.starts_with("/"))
-            .map(|(id, entry)| Post { id, entry })
+            .map(|(id, entry)| Post { id, entry, db: self })
     }
 
     /// The last time any file in the db was modified
@@ -99,19 +106,32 @@ impl PostDb {
     }
 
     /// Blog URL
-    pub fn site_url(&self) -> Result<Url, url::ParseError> {
-        Url::parse(&self.index_metadata.url)
+    pub fn site_url(&self) -> &Url {
+        &self.index_metadata.url
+    }
+
+    /// Post URL
+    pub fn post_url(&self, post: &Post<'_>) -> Url {
+        let mut result = self.site_url().clone();
+        result.path_segments_mut()
+            .expect("site_url shall be a base")
+            .extend(&["p", post.id()]);
+        result
+    }
+
+    pub fn site_summary(&self) -> Option<&str> {
+        self.index_metadata.summary.as_deref()
     }
 
     pub fn lang(&self) -> &str {
         &self.index_metadata.lang
     }
-
+    
     pub async fn refresh_index<'a>(
         &'a mut self,
         allow_search_all: bool,
     ) -> Result<Post<'a>, io::Error> {
-        if self.index_updated + self.ttl <= SystemTime::now() && allow_search_all {
+        if allow_search_all && self.index_updated + self.ttl <= SystemTime::now() {
             let mut posts_dir_iter = fs::read_dir(&self.posts_dir).await?;
             while let Some(ent) = posts_dir_iter.next_entry().await? {
                 let path = PathBuf::from(ent.file_name());
@@ -139,6 +159,22 @@ impl PostDb {
 
         let post_file = dunce::canonicalize(self.posts_dir.join("../index.md"))?;
         self.refresh_inner("/index", post_file).await
+    }
+
+    pub fn get_rss(&self, since: Option<&DateTime<FixedOffset>>, max: usize) -> ChannelBuilder
+    {
+        let mut builder = self.rss_base.clone();
+
+        let items = self.all_posts()
+            .filter(|p| p.metadata().created.as_deref() >= since)
+            .sorted_by(|a, b| b.cmp_published(a))
+            .take(max)
+            .map(|p| p.to_rss_item())
+            .collect_vec();
+
+        builder.items(items);
+
+        builder
     }
 
     fn validate_post_path(&self, id: &str, path: &Path) -> Result<(), io::Error> {
@@ -243,8 +279,9 @@ impl PostDb {
         self.index_updated = max(entry.last_modified, self.index_updated);
         self.index_metadata = meta;
         self.posts.insert("/index".to_string(), entry);
+        self.rss_base = self.make_rss_base();
 
-        info!("Refreshed /index");
+        info!("Refreshed /index and RSS");
 
         Ok(())
     }
@@ -257,6 +294,56 @@ impl PostDb {
         info!("Refreshed {id}");
 
         Ok(())
+    }
+
+    fn make_rss_base(&self) -> ChannelBuilder
+    {
+        use quick_xml::escape::partial_escape;
+
+        let mut channel = rss::ChannelBuilder::default();
+        channel.title(partial_escape(self.site_title()));
+        channel.link(partial_escape(self.site_url().as_str()));
+        channel.language(Some(partial_escape(self.lang()).to_string()));
+        channel.last_build_date(Some(MyDateTime::from(self.index_updated).to_string_rss()));
+
+        let ttl_as_minutes = (self.ttl.as_secs() + 59) / 60;
+        let ttl_as_minutes = std::cmp::max(ttl_as_minutes, 5);
+        channel.ttl(Some(ttl_as_minutes.to_string()));
+
+        channel.pub_date(Some(MyDateTime::now().to_string_rss()));
+
+        channel.image(Some(ImageBuilder::default()
+            .url({
+                let mut url = self.site_url().clone();
+                url.path_segments_mut().unwrap()
+                    .extend(&["public", "favicon.png"]);
+                url.to_string()
+            })
+            .title(self.site_title().to_string())
+            .link(self.site_url().to_string())
+            .build()
+        ));
+
+        let atom = AtomExtensionBuilder::default()
+            .links(vec![
+                {
+                    let mut rss_path = self.site_url().clone();
+                    rss_path.path_segments_mut().unwrap().extend(&["rss"]);
+                    let mut link = Link::default();
+                    link.set_href(rss_path);
+                    link.set_rel("self");
+                    link.set_mime_type(Some("application/rss+xml".to_string()));
+                    link
+                }
+            ])
+            .build();
+        channel.atom_ext(Some(atom));
+
+        if let Some(summary) = self.site_summary() {
+            channel.description(summary.to_string());
+        }
+
+        channel
     }
 }
 
@@ -408,10 +495,6 @@ impl PostEntry {
 }
 
 impl<'a> Post<'a> {
-    // pub fn updated(&self) -> SystemTime {
-    //     self.entry.updated
-    // }
-
     pub fn cmp_published(&self, other: &Post) -> Ordering {
         match (&self.entry.metadata.created, &other.entry.metadata.created) {
             (None, None) => self.entry.last_modified.cmp(&other.entry.last_modified),
@@ -448,6 +531,30 @@ impl<'a> Post<'a> {
             last_modified: self.entry.last_modified,
             metadata: self.metadata().clone(),
         }
+    }
+
+    pub fn to_rss_item(&self) -> rss::Item {
+        use quick_xml::escape::partial_escape;
+
+        let url = self.db.post_url(self).to_string();
+        let guid = rss::GuidBuilder::default()
+            .value(url.clone())
+            .permalink(true)
+            .build();
+        let pub_date: Option<String> = self.metadata().created.as_ref()
+            .map(|t| t.to_string_rss());
+
+        rss::ItemBuilder::default()
+            .title(Some(partial_escape(&self.metadata().title).to_string()))
+            .pub_date(pub_date)
+            .link(Some(url))
+            .guid(Some(guid))
+            .description(self.metadata().summary.as_ref()
+                .map(|s| partial_escape(s).to_string()))
+            .content(Some(format!("{}{}",
+                util::render_base_part(self.db.site_url()),
+                self.body())))
+            .build()
     }
 }
 

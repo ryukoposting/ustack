@@ -1,8 +1,8 @@
 pub use serde::Deserialize;
+use serde::{de::Error, Deserializer};
 use url::Url;
-use super::Error;
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct IndexMetadata {
     pub title: String,
     pub author: Option<String>,
@@ -11,7 +11,8 @@ pub struct IndexMetadata {
     pub highlight: bool,
     #[serde(default)]
     pub tags: Vec<String>,
-    pub url: String,
+    #[serde(deserialize_with = "deserialize_url")]
+    pub url: Url,
     #[serde(default)]
     pub twitter: bool,
     #[serde(default = "default_lang")]
@@ -19,13 +20,13 @@ pub struct IndexMetadata {
 }
 
 impl IndexMetadata {
-    pub fn from_yaml<S: AsRef<str>>(yaml: S) -> Result<Self, Error> {
+    pub fn from_yaml<S: AsRef<str>>(yaml: S) -> Result<Self, super::Error> {
         let deserializer = serde_yaml::Deserializer::from_str(yaml.as_ref());
         Ok(Self::deserialize(deserializer)?)
     }
 
     pub fn twitter_link(&self, post_id: &str) -> Result<Option<Url>, Box<dyn std::error::Error>> {
-        let mut url = Url::parse(&self.url)?;
+        let mut url = self.url.clone();
         if self.twitter {
             url.set_path(&format!("p/{post_id}"));
             Ok(Some(url))
@@ -36,5 +37,35 @@ impl IndexMetadata {
 }
 
 fn default_lang() -> String {
-    "en".to_string()
+    "en_US".to_string()
+}
+
+fn deserialize_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let url_str = String::deserialize(deserializer)?;
+    let url = Url::parse(&url_str)
+        .map_err(|err| D::Error::custom(format!("{err}")))?;
+    if url.cannot_be_a_base() {
+        Err(D::Error::custom("Index URL must be a base URL"))
+    } else {
+        Ok(url)
+    }
+}
+
+impl Default for IndexMetadata {
+    fn default() -> Self {
+        Self {
+            title: Default::default(),
+            author: Default::default(),
+            summary: Default::default(),
+            highlight: Default::default(),
+            tags: Default::default(),
+            // TODO: replace impl of Default with a non-hacky initializer for IndexMetadata
+            url: Url::parse("https://unspecified.com").unwrap(),
+            twitter: Default::default(),
+            lang: Default::default(),
+        }
+    }
 }

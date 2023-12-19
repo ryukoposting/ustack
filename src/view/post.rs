@@ -1,4 +1,3 @@
-use chrono::{Local, DateTime};
 use dioxus::prelude::*;
 use url::Url;
 
@@ -99,6 +98,9 @@ pub fn post(cx: Scope<PostProps>) -> Element {
             }
             footer {
                 twitter
+                social::rss {
+                    canonical_url: &cx.props.canonical_url
+                }
             }
         }
     })

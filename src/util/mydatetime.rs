@@ -30,6 +30,10 @@ impl MyDateTime {
         self.0.format(NO_SECONDS_24_FORMAT)
     }
 
+    pub fn to_string_rss(&self) -> String {
+        self.0.to_rfc2822()
+    }
+
     pub fn system_time(&self) -> SystemTime {
         SystemTime::from(self.0)
     }
@@ -40,6 +44,12 @@ impl Deref for MyDateTime {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl PartialOrd for MyDateTime {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(&other.0)
     }
 }
 
@@ -73,6 +83,12 @@ impl Display for MyDateTime {
 impl From<DateTime<Local>> for MyDateTime {
     fn from(value: DateTime<Local>) -> Self {
         Self(value.fixed_offset())
+    }
+}
+
+impl From<SystemTime> for MyDateTime {
+    fn from(value: SystemTime) -> Self {
+        Self::from(DateTime::<Local>::from(value))
     }
 }
 
