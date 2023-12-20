@@ -1,7 +1,7 @@
 //! `serve` command handler.
 
 use chrono::{DateTime, Local};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use dioxus::prelude::*;
 use hyper::{
     header::{CACHE_CONTROL, CONTENT_TYPE, LAST_MODIFIED, VARY},
@@ -21,10 +21,18 @@ use url::Url;
 use crate::{
     util::{
         self,
+        header_ext::HeaderExt,
         db::{PostContent, PostDb},
     },
     view::{self, IndexProps, NotFoundProps, PostProps},
 };
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, ValueEnum)]
+pub enum RssContent {
+    Never,
+    SupportsDeltas,
+    Always,
+}
 
 #[derive(Debug, Parser)]
 pub struct Serve {
@@ -49,12 +57,17 @@ pub struct Serve {
     /// Adjusts the verbosity of the logger.
     #[arg(long, default_value = "warn")]
     pub log_level: LevelFilter,
+
+    /// When to include post content in RSS feed data
+    #[arg(long, default_value = "supports-deltas")]
+    rss_content: RssContent
 }
 
 struct Server {
     db: PostDb,
     // address: SocketAddr,
     index_page_len: usize,
+    rss_content: RssContent,
     public_dir: PathBuf,
 }
 
@@ -76,9 +89,9 @@ impl Serve {
 
         let server = Server {
             db,
-            // address: self.address,
             index_page_len: self.index_page_len.into(),
             public_dir,
+            rss_content: self.rss_content
         };
         Ok(server)
     }
@@ -207,16 +220,16 @@ impl Server {
             }
         };
 
-        let last_modified = file
+        let post_last_modified = file
             .metadata()
             .await
             .and_then(|meta| meta.modified())
             .map(|lm| DateTime::<Local>::from(lm))
             .ok();
 
-        let cache_valid = last_modified
+        let cache_valid = post_last_modified
             .as_ref()
-            .map_or(false, |timestamp| util::cache_valid(&req, timestamp));
+            .map_or(false, |timestamp| req.headers().is_cache_valid(timestamp));
 
         if cache_valid {
             return Ok(Response::builder()
@@ -231,7 +244,7 @@ impl Server {
             .status(StatusCode::OK)
             .header(CACHE_CONTROL, "max-age=3600");
 
-        let resp = if let Some(lm) = last_modified {
+        let resp = if let Some(lm) = post_last_modified {
             resp.header(LAST_MODIFIED, lm.to_rfc2822())
         } else {
             resp
@@ -245,7 +258,7 @@ impl Server {
         req: Request<Body>,
         content: PostContent,
     ) -> Result<Response<Body>, Box<dyn Error>> {
-        if util::cache_valid(&req, &self.db.index_updated()) {
+        if req.headers().is_cache_valid(&self.db.index_updated()) {
             return Ok(Response::builder()
                 .status(StatusCode::NOT_MODIFIED)
                 .body(Body::empty())?);
@@ -323,7 +336,7 @@ impl Server {
         req: Request<Body>,
         post: PostContent,
     ) -> Result<Response<Body>, Box<dyn Error>> {
-        if util::cache_valid(&req, &post.last_modified()) {
+        if req.headers().is_cache_valid(&post.last_modified()) {
             return Ok(Response::builder()
                 .status(StatusCode::NOT_MODIFIED)
                 .body(Body::empty())?);
@@ -347,46 +360,51 @@ impl Server {
         );
         let body = util::render_html(vdom, self.db.lang());
 
+        let cache_control = format!("max-age={}", self.db.ttl().as_secs());
+
         Ok(Response::builder()
             .status(StatusCode::OK)
-            .header(CACHE_CONTROL, "max-age=3600")
+            .header(CACHE_CONTROL, cache_control)
             .header(LAST_MODIFIED, last_modified)
             .header(CONTENT_TYPE, "text/html; charset=utf-8")
             .body(Body::from(body))?)
     }
 
     async fn rss(&self, req: Request<Body>) -> Result<Response<Body>, Box<dyn Error>> {
-        if util::cache_valid(&req, &self.db.index_updated()) {
+        if req.headers().is_cache_valid(&self.db.index_updated()) {
             return Ok(Response::builder()
                 .status(StatusCode::NOT_MODIFIED)
                 .body(Body::empty())?);
         }
-        
-        let aim_supported = req.headers()
-            .get("A-IM")
-            .map_or(false, |aim| aim == "feed");
 
-        let since = util::IfModifiedSince::new(&req);
-        let since = if aim_supported {
-            since.as_datetime()
+        let headers = req.headers();
+        let if_modified_since = headers.if_modified_since();
+        let deltas_supported = headers.accepted_manipulations()
+            .map_or(false, |am| am.includes_feed());
+
+        let since = if deltas_supported {
+            if_modified_since.as_ref()
+                .map(|ifs| ifs.as_datetime())
         } else {
             None
         };
 
-        let max_results = if aim_supported {
-            25
-        } else {
-            10
+        let include_content = match self.rss_content {
+            RssContent::Never => false,
+            RssContent::Always => true,
+            RssContent::SupportsDeltas => deltas_supported,
         };
 
-        let rss = self.db.get_rss(since, max_results).build();
+        let rss = self.db.get_rss(since, include_content, 25).build();
         let last_modified = self.db.index_updated().to_rfc2822();
 
         debug!("Sending {} items", rss.items.len());
+    
+        let cache_control = format!("im, max-age={}", self.db.ttl().as_secs());
 
         Ok(Response::builder()
             .status(StatusCode::OK)
-            .header(CACHE_CONTROL, "im,max-age=3600")
+            .header(CACHE_CONTROL, cache_control)
             .header(LAST_MODIFIED, last_modified)
             .header(CONTENT_TYPE, "text/xml; charset=utf-8")
             .header(VARY, "A-IM, If-Modified-Since")

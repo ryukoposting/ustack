@@ -110,6 +110,10 @@ impl PostDb {
         &self.index_metadata.url
     }
 
+    pub fn ttl(&self) -> Duration {
+        self.ttl
+    }
+
     /// Post URL
     pub fn post_url(&self, post: &Post<'_>) -> Url {
         let mut result = self.site_url().clone();
@@ -161,7 +165,7 @@ impl PostDb {
         self.refresh_inner("/index", post_file).await
     }
 
-    pub fn get_rss(&self, since: Option<&DateTime<FixedOffset>>, max: usize) -> ChannelBuilder
+    pub fn get_rss(&self, since: Option<&DateTime<FixedOffset>>, include_content: bool, max: usize) -> ChannelBuilder
     {
         let mut builder = self.rss_base.clone();
 
@@ -169,7 +173,7 @@ impl PostDb {
             .filter(|p| p.metadata().created.as_deref() >= since)
             .sorted_by(|a, b| b.cmp_published(a))
             .take(max)
-            .map(|p| p.to_rss_item())
+            .map(|p| p.to_rss_item(include_content))
             .collect_vec();
 
         builder.items(items);
@@ -533,7 +537,7 @@ impl<'a> Post<'a> {
         }
     }
 
-    pub fn to_rss_item(&self) -> rss::Item {
+    pub fn to_rss_item(&self, include_content: bool) -> rss::Item {
         use quick_xml::escape::partial_escape;
 
         let url = self.db.post_url(self).to_string();
@@ -544,17 +548,22 @@ impl<'a> Post<'a> {
         let pub_date: Option<String> = self.metadata().created.as_ref()
             .map(|t| t.to_string_rss());
 
-        rss::ItemBuilder::default()
-            .title(Some(partial_escape(&self.metadata().title).to_string()))
-            .pub_date(pub_date)
-            .link(Some(url))
-            .guid(Some(guid))
-            .description(self.metadata().summary.as_ref()
-                .map(|s| partial_escape(s).to_string()))
-            .content(Some(format!("{}{}",
+        let mut item = rss::ItemBuilder::default();
+        item.title(Some(partial_escape(&self.metadata().title).to_string()));
+        item.pub_date(pub_date);
+        item.link(Some(url));
+        item.guid(Some(guid));
+        item.description(
+            self.metadata().summary.as_ref()
+                .map(|s| partial_escape(s).to_string()));
+
+        if include_content {
+            item.content(Some(format!("{}{}",
                 util::render_base_part(self.db.site_url()),
-                self.body())))
-            .build()
+                self.body())));
+        }
+
+        item.build()
     }
 }
 
