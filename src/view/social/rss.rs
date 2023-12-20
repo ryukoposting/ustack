@@ -8,7 +8,7 @@ pub struct RssProps<'a> {
 
 pub fn rss<'a>(cx: Scope<'a, RssProps<'a>>) -> Element<'a> {
     let mut url: Url = cx.props.canonical_url.clone();
-    url.path_segments_mut().unwrap().extend(&["rss"]);
+    url.set_path("rss");
 
     cx.render(rsx! {
         a {
