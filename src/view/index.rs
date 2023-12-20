@@ -65,6 +65,10 @@ pub fn index(cx: Scope<IndexProps>) -> Element {
 
                     nav {
                         a { href: "/", "Home" }
+                        a {
+                            href: "/rss",
+                            dangerous_inner_html: include_str!("../res/rss-icon.svg")
+                        }
                     }
                 }
                 div {

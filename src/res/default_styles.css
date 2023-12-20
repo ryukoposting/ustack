@@ -52,6 +52,21 @@ main > header h1 {
     margin: 0.5rem auto 0.5rem 0;
 }
 
+main>header>nav svg.rss {
+    height: 1rem;
+    width: 1rem;
+}
+
+svg.rss .button {
+    stroke: none;
+    fill: var(--color-solid);
+}
+
+svg.rss .symbol {
+    stroke: none;
+    fill: var(--background-color);
+}
+
 main > header a {
     text-decoration: none;
 }

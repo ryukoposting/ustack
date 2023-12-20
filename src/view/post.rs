@@ -80,6 +80,10 @@ pub fn post(cx: Scope<PostProps>) -> Element {
 
                     nav {
                         a { href: "/", "Home" }
+                        a {
+                            href: "/rss",
+                            dangerous_inner_html: include_str!("../res/rss-icon.svg")
+                        }
                     }
                 }
                 article {
