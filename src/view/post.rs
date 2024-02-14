@@ -1,16 +1,19 @@
 use dioxus::prelude::*;
 use url::Url;
 
-use super::social;
+use super::{social, header};
 use crate::util::db::PostContent;
 
 #[derive(Props, PartialEq)]
 pub struct PostProps {
     pub post: PostContent,
     pub site_title: String,
+    pub site_title_short: String,
     pub canonical_url: Url,
     #[props(!optional)]
     pub twitter_link: Option<Url>,
+    #[props(!optional)]
+    pub coffee_link: Option<Url>,
 }
 
 pub fn post(cx: Scope<PostProps>) -> Element {
@@ -72,19 +75,10 @@ pub fn post(cx: Scope<PostProps>) -> Element {
         body {
             main {
                 class: "post",
-                header {
-                    a {
-                        href: "/",
-                        h1 { "{cx.props.site_title}" }
-                    }
-
-                    nav {
-                        a { href: "/", "Home" }
-                        a {
-                            href: "/rss",
-                            dangerous_inner_html: include_str!("../res/rss-icon.svg")
-                        }
-                    }
+                header::site_header {
+                    site_title: &cx.props.site_title,
+                    site_title_short: &cx.props.site_title_short,
+                    coffee_link: cx.props.coffee_link.as_ref().map(|c| c.as_str())
                 }
                 article {
                     header {

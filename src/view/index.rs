@@ -2,49 +2,19 @@ use dioxus::prelude::*;
 use url::Url;
 
 use crate::util::db::{PostMeta, PostContent};
+use super::header;
 
 #[derive(Props, PartialEq)]
 pub struct IndexProps {
     pub posts: Vec<PostMeta>,
-    pub page: usize,
-    pub is_end: bool,
     pub content: PostContent,
     pub canonical_url: Url,
+    #[props(!optional)]
+    pub coffee_link: Option<Url>,
+    pub site_title_short: String,
 }
 
 pub fn index(cx: Scope<IndexProps>) -> Element {
-    let back = if cx.props.page > 0 {
-        cx.render(rsx! {
-            a {
-                href: "/?p={cx.props.page - 1}",
-                "Previous"
-            }
-        })
-    } else {
-        cx.render(rsx! {
-            a {
-                class: "disabled",
-                "Previous"
-            }
-        })
-    };
-
-    let forward = if !cx.props.is_end {
-        cx.render(rsx! {
-            a {
-                href: "/?p={cx.props.page + 1}",
-                "Next"
-            }
-        })
-    } else {
-        cx.render(rsx! {
-            a {
-                class: "disabled",
-                "Next"
-            }
-        })
-    };
-
     cx.render(rsx! {
         super::preamble {
             title: &cx.props.content.metadata.title,
@@ -57,18 +27,19 @@ pub fn index(cx: Scope<IndexProps>) -> Element {
         body {
             main {
                 class: "index",
-                header {
+                header::site_header {
+                    site_title: &cx.props.content.metadata.title,
+                    site_title_short: &cx.props.site_title_short,
+                    coffee_link: cx.props.coffee_link.as_ref().map(|c| c.as_str())
+                }
+                nav {
                     a {
-                        href: "/",
-                        h1 { "{cx.props.content.metadata.title}" }
-                    }
-
-                    nav {
-                        a { href: "/", "Home" }
-                        a {
-                            href: "/rss",
-                            dangerous_inner_html: include_str!("../res/rss-icon.svg")
-                        }
+                        href: "/archive",
+                        "Archive"
+                    },
+                    a {
+                        href: "/random",
+                        "Random Post"
                     }
                 }
                 div {
@@ -88,11 +59,6 @@ pub fn index(cx: Scope<IndexProps>) -> Element {
                             }
                         }
                     }
-                }
-                nav {
-                    back
-                    "Page {cx.props.page + 1}"
-                    forward
                 }
             }
         }

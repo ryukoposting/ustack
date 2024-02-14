@@ -52,12 +52,29 @@ main > header h1 {
     margin: 0.5rem auto 0.5rem 0;
 }
 
+@media screen and (max-width: 400px) {
+    main>header h1 {
+        font-size: 1.2rem;
+    }
+}
+
+@media screen and (max-width: 340px) {
+    a .short-title {
+        display: block;
+    }
+
+    a .site-title {
+        display: none;
+    }
+}
+
 main>header>nav svg.rss {
     height: 1rem;
     width: 1rem;
 }
 
-svg.rss .button {
+svg.rss .button,
+svg.coffee {
     stroke: none;
     fill: var(--color-solid);
 }
@@ -146,6 +163,7 @@ article img {
 
 article img {
     max-width: 100%;
+    display: block;
 }
 
 article pre {

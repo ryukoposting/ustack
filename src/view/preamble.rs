@@ -10,7 +10,7 @@ pub struct PreambleProps<'a> {
     author: Option<&'a str>,
     #[props(!optional)]
     summary: Option<&'a str>,
-    tags: &'a Vec<String>,
+    tags: Option<&'a Vec<String>>,
 }
 
 pub fn preamble<'a>(cx: Scope<'a, PreambleProps<'a>>) -> Element<'a> {
@@ -39,8 +39,8 @@ pub fn preamble<'a>(cx: Scope<'a, PreambleProps<'a>>) -> Element<'a> {
         meta { name: "description", content: "{summary}" }
     }));
 
-    let keywords = if cx.props.tags.len() > 0 {
-        let keywords = cx.props.tags.join(", ");
+    let keywords = if cx.props.tags.map_or(0, |t| t.len()) > 0 {
+        let keywords = cx.props.tags.unwrap().join(", ");
         cx.render(rsx! {
             meta { name: "keywords", content: "{keywords}" }
         })

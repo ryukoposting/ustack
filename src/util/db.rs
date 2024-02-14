@@ -20,6 +20,7 @@ use comrak::{
 };
 use itertools::Itertools;
 use log::{debug, error, info, warn};
+use rand::{seq::{IteratorRandom, SliceRandom}, thread_rng};
 use rss::{ChannelBuilder, extension::atom::{AtomExtensionBuilder, Link}, ImageBuilder};
 use tokio::{
     fs::{self, File},
@@ -83,6 +84,14 @@ impl PostDb {
         self.posts.get(id).map(|entry| Post { id, entry, db: self })
     }
 
+    pub fn get_random_id<'a>(&'a self) -> Option<&'a str> {
+        let mut rng = thread_rng();
+        let choices = self.posts.keys()
+            .filter(|id| !id.starts_with('/'))
+            .choose(&mut rng);
+        choices.map(|id| id.as_str())
+    }
+
     pub fn all_posts<'a>(&'a self) -> impl Iterator<Item = Post<'a>> {
         self.posts
             .iter()
@@ -105,9 +114,22 @@ impl PostDb {
         &self.index_metadata.title
     }
 
+    /// Blog title
+    pub fn site_title_short(&self) -> &str {
+        let site_title = self.site_title();
+        self.index_metadata.short_title
+            .as_deref()
+            .unwrap_or(site_title)
+    }
+
     /// Blog URL
     pub fn site_url(&self) -> &Url {
         &self.index_metadata.url
+    }
+
+    /// Coffee URL
+    pub fn coffee_url(&self) -> Option<&Url> {
+        self.index_metadata.coffee.as_ref()
     }
 
     pub fn ttl(&self) -> Duration {
@@ -425,7 +447,6 @@ impl<'a> Parser<'a> {
         root: &'a Node<'a, RefCell<Ast>>,
     ) -> Result<IndexMetadata, io::Error> {
         let front_matter = root
-            .clone()
             .children()
             .filter_map(|child| {
                 let data = child.data.borrow();

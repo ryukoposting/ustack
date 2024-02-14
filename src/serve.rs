@@ -4,7 +4,8 @@ use chrono::{DateTime, Local};
 use clap::{Parser, ValueEnum};
 use dioxus::prelude::*;
 use hyper::{
-    header::{CACHE_CONTROL, CONTENT_TYPE, LAST_MODIFIED, VARY},
+    body::HttpBody,
+    header::{CACHE_CONTROL, CONTENT_TYPE, LAST_MODIFIED, LOCATION, VARY},
     server::conn::AddrStream,
     service::service_fn,
     Body, Method, Request, Response, StatusCode,
@@ -21,10 +22,10 @@ use url::Url;
 use crate::{
     util::{
         self,
-        header_ext::HeaderExt,
         db::{PostContent, PostDb},
+        header_ext::HeaderExt,
     },
-    view::{self, IndexProps, NotFoundProps, PostProps},
+    view::{self, ArchiveProps, IndexProps, NotFoundProps, PostProps},
 };
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, ValueEnum)]
@@ -60,7 +61,7 @@ pub struct Serve {
 
     /// When to include post content in RSS feed data
     #[arg(long, default_value = "supports-deltas")]
-    rss_content: RssContent
+    rss_content: RssContent,
 }
 
 struct Server {
@@ -91,7 +92,7 @@ impl Serve {
             db,
             index_page_len: self.index_page_len.into(),
             public_dir,
-            rss_content: self.rss_content
+            rss_content: self.rss_content,
         };
         Ok(server)
     }
@@ -130,7 +131,7 @@ impl Server {
 
         let req_uri = req.uri().path();
 
-        let result = if req.method() == Method::GET && (req_uri == "/" || req_uri == "/rss") {
+        let result = if req.method() == Method::GET && (req_uri == "/" || req_uri == "/rss" || req_uri.starts_with("/archive")) {
             let index = {
                 let mut server = server.write().await;
                 server
@@ -141,11 +142,15 @@ impl Server {
             };
 
             match index {
-                Ok(index) => if req_uri == "/rss" {
-                    server.read().await.rss(req).await
-                } else {
-                    server.read().await.index(req, index).await
-                },
+                Ok(index) => {
+                    if req_uri == "/rss" {
+                        server.read().await.rss(req).await
+                    } else if req_uri == "/" {
+                        server.read().await.index(req, index).await
+                    } else {
+                        server.read().await.archive(req, index).await
+                    }
+                }
                 Err(err) => Err(err.into()),
             }
         } else if req.method() == Method::GET && req_uri.starts_with("/p/") {
@@ -171,12 +176,12 @@ impl Server {
                 }
                 Err(err) => Err(err.into()),
             }
+        } else if req.method() == Method::GET && req_uri.starts_with("/random") {
+            server.read().await.random(req).await
         } else if req.method() == Method::GET && req_uri.starts_with("/public/") {
             let server = server.read().await;
             server.public(req).await
-        } else if req.method() == Method::GET
-            && req_uri.to_lowercase().as_str() == "/robots.txt"
-        {
+        } else if req.method() == Method::GET && req_uri.to_lowercase().as_str() == "/robots.txt" {
             Self::robots()
         } else {
             let server = server.read().await;
@@ -266,59 +271,32 @@ impl Server {
 
         let canonical_url = self.db.site_url().clone();
 
-        let req_url = if req.uri().host().is_some() {
-            Url::parse(&req.uri().to_string())?
-        } else {
-            let mut req_url = canonical_url.clone();
-            req_url.set_path(req.uri().path());
-            req_url.set_query(req.uri().query());
-            req_url
-        };
+        let coffee_link = self.db.coffee_url().map(|c| c.to_owned());
+
+        let site_title_short = self.db.site_title_short().to_owned();
 
         let last_modified = content.last_modified().to_rfc2822();
-        let page = req_url
-            .query_pairs()
-            .filter_map(|(k, v)| {
-                if k == "p" {
-                    Some(v.parse::<usize>())
-                } else {
-                    None
-                }
-            })
-            .nth(0)
-            .unwrap_or(Ok(0));
-
-        let page = match page {
-            Ok(page) => page,
-            Err(err) => {
-                return Ok(Response::builder()
-                    .status(StatusCode::BAD_REQUEST)
-                    .body(Body::from(format!("error: {err}")))?)
-            }
-        };
-
-        let nposts = self.db.all_posts().count();
 
         let posts = self
             .db
             .all_posts()
             .sorted_by(|a, b| b.cmp_published(a))
             // .sorted_by_key(|p| p.updated())
-            .skip(page * self.index_page_len)
+            // .skip(page * self.index_page_len)
             .take(self.index_page_len)
             .map(|post| post.to_post_meta())
             .collect_vec();
 
-        let is_end = nposts <= self.index_page_len * (page + 1);
+        // let is_end = nposts <= self.index_page_len * (page + 1);
 
         let vdom = VirtualDom::new_with_props(
             view::index,
             IndexProps {
                 posts,
-                page,
-                is_end,
                 content,
                 canonical_url,
+                site_title_short,
+                coffee_link,
             },
         );
         let body = util::render_html(vdom, self.db.lang());
@@ -326,6 +304,67 @@ impl Server {
         Ok(Response::builder()
             .status(StatusCode::OK)
             .header(CACHE_CONTROL, "max-age=3600")
+            .header(LAST_MODIFIED, last_modified)
+            .header(CONTENT_TYPE, "text/html; charset=utf-8")
+            .body(Body::from(body))?)
+    }
+
+    async fn archive(&self, req: Request<Body>, index: PostContent) -> Result<Response<Body>, Box<dyn Error>> {
+        let posts = self
+            .db
+            .all_posts()
+            .sorted_by(|a, b| b.cmp_published(a))
+            .map(|post| post.to_post_meta())
+            .collect_vec();
+
+        let canonical_url = self.db.site_url().clone();
+        let coffee_link = self.db.coffee_url().map(|c| c.to_owned());
+        let site_title_short = self.db.site_title_short().to_owned();
+        let last_modified = self.db.index_updated().to_rfc2822();
+
+        let vdom = VirtualDom::new_with_props(
+            view::archive,
+            ArchiveProps {
+                posts,
+                metadata: index.metadata,
+                canonical_url,
+                site_title_short,
+                coffee_link,
+            },
+        );
+        let body = util::render_html(vdom, self.db.lang());
+
+        Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(CACHE_CONTROL, "max-age=3600")
+            .header(LAST_MODIFIED, last_modified)
+            .header(CONTENT_TYPE, "text/html; charset=utf-8")
+            .body(Body::from(body))?)
+    }
+
+    async fn random(&self, req: Request<Body>) -> Result<Response<Body>, Box<dyn Error>> {
+        let id = self
+            .db
+            .get_random_id()
+            .ok_or_else(|| "this blog has no posts!".to_string())
+            .map_err(|e| Box::<dyn Error>::from(e))?;
+
+        let post = self
+            .db
+            .get(&id)
+            .ok_or_else(|| "unexpected - random id not valid".to_string())
+            .map_err(|e| Box::<dyn Error>::from(e))?
+            .to_post_content();
+
+        let last_modified = post.last_modified().to_rfc2822();
+
+        let body = self.render_post(post, &id, req.uri().query())?;
+
+        let location = format!("/p/{id}");
+
+        Ok(Response::builder()
+            .status(StatusCode::FOUND)
+            .header(LOCATION, location)
             .header(LAST_MODIFIED, last_modified)
             .header(CONTENT_TYPE, "text/html; charset=utf-8")
             .body(Body::from(body))?)
@@ -342,23 +381,9 @@ impl Server {
                 .body(Body::empty())?);
         }
 
-        let site_title = self.db.site_title().to_string();
-        let mut canonical_url = self.db.site_url().clone();
-        canonical_url.set_path(req.uri().path());
-        canonical_url.set_query(req.uri().query());
         let last_modified = post.last_modified().to_rfc2822();
-        let twitter_link = self.db.twitter_link(&post.id)?;
 
-        let vdom = VirtualDom::new_with_props(
-            view::post,
-            PostProps {
-                post,
-                site_title,
-                canonical_url,
-                twitter_link,
-            },
-        );
-        let body = util::render_html(vdom, self.db.lang());
+        let body = self.render_post(post, req.uri().path(), req.uri().query())?;
 
         let cache_control = format!("max-age={}", self.db.ttl().as_secs());
 
@@ -370,6 +395,34 @@ impl Server {
             .body(Body::from(body))?)
     }
 
+    fn render_post(
+        &self,
+        post: PostContent,
+        path: &str,
+        query: Option<&str>,
+    ) -> Result<String, Box<dyn Error>> {
+        let site_title = self.db.site_title().to_string();
+        let mut canonical_url = self.db.site_url().clone();
+        canonical_url.set_path(path);
+        canonical_url.set_query(query);
+        let twitter_link = self.db.twitter_link(&post.id)?;
+        let coffee_link = self.db.coffee_url().map(|c| c.to_owned());
+        let site_title_short = self.db.site_title_short().to_owned();
+
+        let vdom = VirtualDom::new_with_props(
+            view::post,
+            PostProps {
+                post,
+                site_title,
+                canonical_url,
+                twitter_link,
+                coffee_link,
+                site_title_short,
+            },
+        );
+        Ok(util::render_html(vdom, self.db.lang()))
+    }
+
     async fn rss(&self, req: Request<Body>) -> Result<Response<Body>, Box<dyn Error>> {
         if req.headers().is_cache_valid(&self.db.index_updated()) {
             return Ok(Response::builder()
@@ -379,12 +432,12 @@ impl Server {
 
         let headers = req.headers();
         let if_modified_since = headers.if_modified_since();
-        let deltas_supported = headers.accepted_manipulations()
+        let deltas_supported = headers
+            .accepted_manipulations()
             .map_or(false, |am| am.includes_feed());
 
         let since = if deltas_supported {
-            if_modified_since.as_ref()
-                .map(|ifs| ifs.as_datetime())
+            if_modified_since.as_ref().map(|ifs| ifs.as_datetime())
         } else {
             None
         };
@@ -399,7 +452,7 @@ impl Server {
         let last_modified = self.db.index_updated().to_rfc2822();
 
         debug!("Sending {} items", rss.items.len());
-    
+
         let cache_control = format!("im, max-age={}", self.db.ttl().as_secs());
 
         Ok(Response::builder()
