@@ -73,6 +73,7 @@ struct Server {
 }
 
 const ROBOTS_TXT: &str = include_str!("res/robots.txt");
+const BOTS: &str = include_str!("res/bots.txt");
 
 impl Serve {
     pub fn directory(&self) -> Result<PathBuf, std::io::Error> {
@@ -154,6 +155,12 @@ impl Server {
                 Err(err) => Err(err.into()),
             }
         } else if req.method() == Method::GET && req_uri.starts_with("/p/") {
+            if Server::is_stupid_bot(&req) {
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::from(BOTS));
+            }
+
             let post = {
                 let id = req_uri.split('/').nth(2).unwrap_or("");
                 let id = id.replace('.', "");
@@ -483,5 +490,12 @@ impl Server {
             .status(StatusCode::NOT_FOUND)
             .header(CONTENT_TYPE, "text/html; charset=utf-8")
             .body(Body::from(body))?)
+    }
+
+    fn is_stupid_bot(req: &Request<Body>) -> bool {
+        req.headers().get_all("User-Agent").iter().any(|h| match h.to_str() {
+            Ok(s) => s.contains("GPTBot") || s.contains("ClaudeBot"),
+            Err(_) => false
+        })
     }
 }
