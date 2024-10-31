@@ -156,6 +156,7 @@ impl Server {
         } else if req.method() == Method::GET && req_uri.starts_with("/p/") {
             let post = {
                 let id = req_uri.split('/').nth(2).unwrap_or("");
+                let id = id.replace('.', "");
                 let mut server = server.write().await;
 
                 if let Err(err) = server.db.refresh_index(false).await {
@@ -164,7 +165,7 @@ impl Server {
 
                 server
                     .db
-                    .refresh(id)
+                    .refresh(&id)
                     .await
                     .map(|post| post.to_post_content())
             };
