@@ -4,6 +4,7 @@ use url::Url;
 pub mod db;
 pub mod mydatetime;
 pub mod header_ext;
+pub mod has_any_symlinks;
 
 pub fn render_html(mut vdom: VirtualDom, lang: &str) -> String {
     let _ = vdom.rebuild();

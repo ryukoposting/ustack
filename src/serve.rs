@@ -4,26 +4,22 @@ use chrono::{DateTime, Local};
 use clap::{Parser, ValueEnum};
 use dioxus::prelude::*;
 use hyper::{
-    body::HttpBody,
     header::{CACHE_CONTROL, CONTENT_TYPE, LAST_MODIFIED, LOCATION, VARY},
     server::conn::AddrStream,
     service::service_fn,
     Body, Method, Request, Response, StatusCode,
 };
 use itertools::Itertools;
-use log::{debug, error, info, LevelFilter};
+use log::{debug, error, info, warn, LevelFilter};
 use std::{
     convert::Infallible, env, error::Error, io::ErrorKind, net::SocketAddr, num::NonZeroUsize,
     path::PathBuf, sync::Arc,
 };
 use tokio::{fs::File, io::AsyncReadExt, sync::RwLock};
-use url::Url;
 
 use crate::{
     util::{
-        self,
-        db::{PostContent, PostDb},
-        header_ext::HeaderExt,
+        self, db::{PostContent, PostDb}, has_any_symlinks::HasAnySymlinks, header_ext::HeaderExt
     },
     view::{self, ArchiveProps, IndexProps, NotFoundProps, PostProps},
 };
@@ -211,14 +207,22 @@ impl Server {
         let subpath = req.uri().path().strip_prefix("/public/").unwrap();
         let path = self.public_dir.join(subpath);
 
-        let is_pem = path.extension().map_or(false, |ext| ext == "pem");
+        let is_suspicious = path
+            .iter()
+            .any(|segment| match segment.to_str() {
+                Some(segment) =>
+                    segment.starts_with('.') ||
+                    segment.ends_with(".pem") ||
+                    segment.starts_with("id_rsa"),
+                None => true,
+            });
 
-        let is_id_rsa = path
-            .file_name()
-            .map_or(false, |name| name.to_string_lossy().contains("id_rsa"));
-
-        // Always return 404 for symlinks, files ending in .pem, and files containing id_rsa
-        if is_pem || is_id_rsa || path.is_symlink() {
+        // Always return 404 for symlinks or anything that appears to be suspicious
+        if is_suspicious {
+            info!("Blocking suspicious request: {} {}", req.method(), req.uri());
+            return self.not_found(req).await;
+        } else if path.has_any_symlinks() {
+            warn!("Blocking request that would have traversed a symlink: {} {}", req.method(), req.uri());
             return self.not_found(req).await;
         }
 
@@ -317,7 +321,7 @@ impl Server {
             .body(Body::from(body))?)
     }
 
-    async fn archive(&self, req: Request<Body>, index: PostContent) -> Result<Response<Body>, Box<dyn Error>> {
+    async fn archive(&self, _req: Request<Body>, index: PostContent) -> Result<Response<Body>, Box<dyn Error>> {
         let posts = self
             .db
             .all_posts()
