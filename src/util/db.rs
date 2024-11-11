@@ -20,7 +20,7 @@ use comrak::{
 };
 use itertools::Itertools;
 use log::{debug, error, info, warn};
-use rand::{seq::{IteratorRandom, SliceRandom}, thread_rng};
+use rand::{seq::IteratorRandom, thread_rng};
 use rss::{ChannelBuilder, extension::atom::{AtomExtensionBuilder, Link}, ImageBuilder};
 use tokio::{
     fs::{self, File},
@@ -414,7 +414,6 @@ impl<'a> Parser<'a> {
 
     fn get_metadata(&self, root: &'a Node<'a, RefCell<Ast>>) -> Result<Metadata, io::Error> {
         let front_matter = root
-            .clone()
             .children()
             .filter_map(|child| {
                 let data = child.data.borrow();

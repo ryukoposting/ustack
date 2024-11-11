@@ -80,7 +80,7 @@ const SEPARATORS: [char; 19] = [
     '/', '[', ']', '?', '=', '{', '}', ' ', '\t'
 ];
 
-// Header value 'control characters' according to RFC 2616
-fn is_ctl(c: char) -> bool {
-    c.is_ascii() && (c as u8 > 31) && (c as u8 != 127)
-}
+// // Header value 'control characters' according to RFC 2616
+// fn is_ctl(c: char) -> bool {
+//     c.is_ascii() && (c as u8 > 31) && (c as u8 != 127)
+// }
