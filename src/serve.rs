@@ -498,7 +498,10 @@ impl Server {
 
     fn is_stupid_bot(req: &Request<Body>) -> bool {
         req.headers().get_all("User-Agent").iter().any(|h| match h.to_str() {
-            Ok(s) => s.contains("GPTBot") || s.contains("ClaudeBot"),
+            Ok(s) => {
+                let s = s.to_lowercase();
+                s.contains("gptbot") || s.contains("claudebot") || s.contains("imagesift")
+            },
             Err(_) => false
         })
     }
